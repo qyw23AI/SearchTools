@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+.installer/
+.cache/
+.runtime/
+data/
+.env
+.env.*
+!.env.example
+*.sqlite3*
+*.log
+config.local.json
+# Local research notes and screenshots are not public source artifacts.
+/docs/workspace.jpg
+/三工具科研使用指南.md
+/统一科研App设计方案.md

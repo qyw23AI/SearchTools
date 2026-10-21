@@ -1,0 +1,59 @@
+{
+  "llm": "ollama/qwen3:8b",
+  "llm_config": {
+    "model_list": [
+      {
+        "model_name": "ollama/qwen3:8b",
+        "litellm_params": {
+          "model": "ollama/qwen3:8b",
+          "api_base": "http://127.0.0.1:11434",
+          "temperature": 0
+        }
+      }
+    ]
+  },
+  "summary_llm": "ollama/qwen3:8b",
+  "summary_llm_config": {
+    "model_list": [
+      {
+        "model_name": "ollama/qwen3:8b",
+        "litellm_params": {
+          "model": "ollama/qwen3:8b",
+          "api_base": "http://127.0.0.1:11434",
+          "temperature": 0
+        }
+      }
+    ]
+  },
+  "embedding": "ollama/qwen3-embedding:4b",
+  "embedding_config": {
+    "kwargs": {
+      "api_base": "http://127.0.0.1:11434"
+    }
+  },
+  "agent": {
+    "agent_llm": "ollama/qwen3:8b",
+    "agent_llm_config": {
+      "model_list": [
+        {
+          "model_name": "ollama/qwen3:8b",
+          "litellm_params": {
+            "model": "ollama/qwen3:8b",
+            "api_base": "http://127.0.0.1:11434",
+            "temperature": 0
+          }
+        }
+      ]
+    },
+    "index": {
+      "name": "research-papers",
+      "paper_directory": "papers",
+      "index_directory": "index"
+    },
+    "max_timesteps": 5
+  },
+  "answer": {
+    "evidence_k": 5,
+    "max_concurrent_requests": 1
+  }
+}
