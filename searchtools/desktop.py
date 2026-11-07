@@ -101,6 +101,7 @@ class Desktop(Gtk.Application):
         ws_view=self.views.get('workspace')
         if dt_view:
             dt_view.run_javascript('window.__stSyncModelNow && window.__stSyncModelNow()',None,None,None)
+            dt_view.run_javascript('window.__stSyncDrawerNow && window.__stSyncDrawerNow()',None,None,None)
         if ws_view and self.stack.get_visible_child() is ws_view:
             ws_view.run_javascript('window.searchtoolsOnTabVisible && window.searchtoolsOnTabVisible()',None,None,None)
             GLib.timeout_add(300,lambda:(ws_view.run_javascript('window.searchtoolsOnTabVisible && window.searchtoolsOnTabVisible()',None,None,None),False)[1])

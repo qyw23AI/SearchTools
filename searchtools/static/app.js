@@ -3,6 +3,23 @@ const token = $('meta[name="searchtools-token"]')?.content || '';
 let state = {}, project = null, page = 'overview', detail = null;
 let projectId = localStorage.getItem('searchtools-project') || '', drafts = {};
 
+let syncChannel = null;
+if (typeof BroadcastChannel !== 'undefined') {
+  try {
+    syncChannel = new BroadcastChannel('searchtools_sync');
+    syncChannel.onmessage = async (ev) => {
+      const data = ev.data || {};
+      if (data.type === 'project-change' && data.projectId && data.projectId !== projectId) {
+        projectId = data.projectId;
+        localStorage.setItem('searchtools-project', projectId);
+        await load();
+      } else if (data.type === 'job-updated') {
+        await load(false);
+      }
+    };
+  } catch (_) {}
+}
+
 const labels = {
   overview: '工作台',
   library: '文献管理',
@@ -70,8 +87,19 @@ function saveDraft() {
 
 async function load(render = true) {
   state = await api('/api/state');
+  if (!projectId) {
+    try {
+      const act = await api('/api/active-project');
+      if (act && act.project && state.projects.some(p => p.id === act.project)) {
+        projectId = act.project;
+      }
+    } catch (_) {}
+  }
   if (!state.projects.some(p => p.id === projectId)) {
     projectId = state.projects[0]?.id || '';
+  }
+  if (projectId) {
+    localStorage.setItem('searchtools-project', projectId);
   }
   $('#projects').innerHTML = state.projects.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
   $('#projects').value = projectId;
@@ -409,6 +437,12 @@ $('#projects').onchange = run(async e => {
   saveDraft();
   projectId = e.target.value;
   localStorage.setItem('searchtools-project', projectId);
+  try {
+    await api('/api/active-project', { project: projectId });
+  } catch (_) {}
+  if (syncChannel) {
+    try { syncChannel.postMessage({ type: 'project-change', projectId }); } catch (_) {}
+  }
   detail = null;
   await load();
 });
@@ -420,6 +454,12 @@ $('#projectForm').onsubmit = run(async e => {
   const p = await api('/api/projects', { name: $('#projectName').value });
   projectId = p.id;
   localStorage.setItem('searchtools-project', projectId);
+  try {
+    await api('/api/active-project', { project: projectId });
+  } catch (_) {}
+  if (syncChannel) {
+    try { syncChannel.postMessage({ type: 'project-change', projectId }); } catch (_) {}
+  }
   $('#dialog').close();
   $('#projectName').value = '';
   go('overview');

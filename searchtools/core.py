@@ -76,6 +76,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS evidence_cards(id TEXT PRIMARY KEY,project TEXT NOT NULL,job_id TEXT,paper_id TEXT,zotero_key TEXT,citation TEXT,doi TEXT,title TEXT,page TEXT,quote TEXT,summary TEXT,claim TEXT,score REAL,pinned INTEGER DEFAULT 0,tags TEXT,created REAL);
             CREATE TABLE IF NOT EXISTS candidate_batches(id TEXT PRIMARY KEY,scope_id TEXT,topic TEXT,query TEXT,candidates_json TEXT,status TEXT DEFAULT 'pending_confirmation',created REAL);
             CREATE TABLE IF NOT EXISTS trace_events(id TEXT PRIMARY KEY,scope_id TEXT,tool TEXT,status TEXT,summary TEXT,detail_json TEXT,created REAL);
+            CREATE TABLE IF NOT EXISTS kv_meta(key TEXT PRIMARY KEY, value TEXT);
             ''')
             # Idempotent column migrations for databases created by v0.1 - v2.
             for table,cols in {'papers':{'zotero_item':'TEXT','attachment_key':'TEXT','citekey':'TEXT','authors':'TEXT','year':'TEXT','publication':'TEXT','title':'TEXT','doi':'TEXT','origin':"TEXT DEFAULT 'upload'",'added':'REAL'},
@@ -102,6 +103,27 @@ class Store:
         if not rows:
             raise ValueError('项目不存在')
         return rows[0]
+
+    def set_active_project(self, pid: str):
+        if pid:
+            try:
+                self.project(pid)
+            except Exception:
+                return False
+        with self.db() as db:
+            db.execute('INSERT INTO kv_meta(key, value) VALUES("active_project", ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (pid,))
+        return True
+
+    def get_active_project(self) -> str:
+        rows = self.rows('SELECT value FROM kv_meta WHERE key="active_project"')
+        if rows and rows[0]['value']:
+            try:
+                self.project(rows[0]['value'])
+                return rows[0]['value']
+            except Exception:
+                pass
+        projs = self.rows('SELECT id FROM projects ORDER BY created DESC')
+        return projs[0]['id'] if projs else ''
 
     def folder(self, pid):
         self.project(pid)
@@ -1009,6 +1031,18 @@ class Store:
         with self.db() as db:
             db.execute('INSERT INTO jobs(id,project,kind,prompt,source,status,message,created,options) VALUES(?,?,?,?,?,?,?,?,?)',
                        (jid,pid,kind,str(prompt)[:20000],source,'queued','等待执行',time.time(),json.dumps(options,ensure_ascii=False)))
+        try:
+            prompt_str = str(prompt or '').strip()
+            summary = f"启动检索任务 [{jid[:8]}]: {prompt_str[:50]}" if prompt_str else f"启动任务 [{jid[:8]}]: {kind}"
+            self.log_trace(
+                pid,
+                f"job_{kind}",
+                'running',
+                summary,
+                {'job_id': jid, 'kind': kind, 'prompt': prompt_str[:120]}
+            )
+        except Exception:
+            pass
         return jid
 
     def update(self,jid,status,message):
@@ -1146,14 +1180,42 @@ class Worker:
                         raise RuntimeError(err_detail or '引擎执行失败，请查看任务日志')
                     result=json.loads((work/'result.json').read_text())
                     (folder/'results'/f'{jid}.md').write_text(result.get('answer','任务完成'))
+                    saved_cards = []
                     try:
-                        self.store.extract_and_save_evidence_from_result(pid, jid, result)
+                        saved_cards = self.store.extract_and_save_evidence_from_result(pid, jid, result)
                     except Exception:
                         pass
                     self.store.update(jid,'done','已完成')
+                    try:
+                        job_rows = self.store.rows('SELECT kind, prompt FROM jobs WHERE id=?', (jid,))
+                        j_kind = job_rows[0]['kind'] if job_rows else 'task'
+                        j_prompt = (job_rows[0]['prompt'] or '').strip() if job_rows else ''
+                        card_cnt = len(saved_cards) if saved_cards else 0
+                        summary = f"检索完成 [{jid[:8]}]: 提取 {card_cnt} 张证据卡" if card_cnt > 0 else f"任务完成 [{jid[:8]}]: {j_kind} ({j_prompt[:40]})"
+                        self.store.log_trace(
+                            pid,
+                            f"job_{j_kind}",
+                            'done',
+                            summary,
+                            {'job_id': jid, 'kind': j_kind, 'cards_count': card_cnt, 'answer': (result.get('answer') or '')[:300]}
+                        )
+                    except Exception:
+                        pass
         except Exception as e:
             if self.store.rows('SELECT status FROM jobs WHERE id=?',(jid,))[0]['status']!='cancelled':
                 self.store.update(jid,'failed',str(e))
+                try:
+                    job_rows = self.store.rows('SELECT kind FROM jobs WHERE id=?', (jid,))
+                    j_kind = job_rows[0]['kind'] if job_rows else 'task'
+                    self.store.log_trace(
+                        pid,
+                        f"job_{j_kind}",
+                        'failed',
+                        f"任务失败 [{jid[:8]}]: {str(e)[:100]}",
+                        {'job_id': jid, 'kind': j_kind, 'error': str(e)[:200]}
+                    )
+                except Exception:
+                    pass
         finally:
             with self.lock:
                 self.process=None

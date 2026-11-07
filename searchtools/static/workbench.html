@@ -43,11 +43,15 @@
         <button id="wb-btn-clean-highlights" class="wb-btn wb-btn-secondary wb-btn-xs" style="white-space:nowrap;" title="一键清理 Zotero 中的临时论据高亮标注">🧹 清理高亮</button>
       </div>
 
-      <!-- 4 Navigation Tabs -->
+      <!-- 5 Navigation Tabs -->
       <nav class="wb-tabs" role="tablist">
         <button class="wb-tab active" data-tab="trace" role="tab">
           <span>本轮溯源</span>
           <span id="wb-badge-trace" class="wb-tab-count">0</span>
+        </button>
+        <button class="wb-tab" data-tab="history" role="tab">
+          <span>问答历史</span>
+          <span id="wb-badge-history" class="wb-tab-count">0</span>
         </button>
         <button class="wb-tab" data-tab="cards" role="tab">
           <span>证据卡</span>
@@ -81,6 +85,15 @@
           <span class="wb-hint">实时追踪大模型调用 Zotero / PaperQA2 / 外部检索的每一步操作与覆盖度</span>
         </div>
         <div id="wb-trace-list" class="wb-list"></div>
+      </section>
+
+      <!-- Tab 2: Question & Retrieval History -->
+      <section id="wb-panel-history" class="wb-panel">
+        <div class="wb-section-toolbar">
+          <span class="wb-hint">PaperQA2 界面问答与实证检索记录（点击查看问答详情与提取卡片）</span>
+          <button id="wb-btn-refresh-history" class="wb-btn wb-btn-secondary wb-btn-xs" style="margin-left:auto;">↻ 刷新历史</button>
+        </div>
+        <div id="wb-history-list" class="wb-list"></div>
       </section>
 
       <!-- Tab 2: Evidence Cards v2 -->

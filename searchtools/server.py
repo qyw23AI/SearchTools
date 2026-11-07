@@ -136,6 +136,34 @@ def handler(app):
                 q = parse_qs(u.query)
                 path = u.path
 
+                if path == '/api/active-project':
+                    return self.send(200, {'project': app.store.get_active_project()})
+
+                if path == '/api/history':
+                    pid = q.get('project', [''])[0] or app.store.get_active_project()
+                    if not pid:
+                        return self.send(200, {'jobs': [], 'total': 0})
+                    jobs = app.store.rows(
+                        "SELECT id, project, kind, prompt, source, status, message, created FROM jobs WHERE project=? ORDER BY created DESC",
+                        (pid,)
+                    )
+                    for j in jobs:
+                        c_cnt = app.store.rows('SELECT COUNT(*) as cnt FROM evidence_cards WHERE job_id=?', (j['id'],))
+                        j['cards_count'] = c_cnt[0]['cnt'] if c_cnt else 0
+                        res_file = app.store.folder(j['project']) / 'jobs' / j['id'] / 'result.json'
+                        if res_file.exists():
+                            try:
+                                r_data = json.loads(res_file.read_text(encoding='utf-8'))
+                                j['answer_preview'] = (r_data.get('answer') or '')[:300]
+                                j['has_result'] = True
+                            except Exception:
+                                j['answer_preview'] = ''
+                                j['has_result'] = False
+                        else:
+                            j['answer_preview'] = ''
+                            j['has_result'] = False
+                    return self.send(200, {'jobs': jobs, 'total': len(jobs)})
+
                 # State and project
                 if path == '/api/state':
                     return self.send(200, {
@@ -372,6 +400,11 @@ def handler(app):
                 data = json.loads(raw)
                 if self.path == '/api/projects':
                     return self.send(200, {'id': app.store.create_project(data['name'])})
+
+                if self.path == '/api/active-project':
+                    pid = data.get('project', '')
+                    app.store.set_active_project(pid)
+                    return self.send(200, {'ok': True, 'project': pid})
 
                 if self.path == '/api/jobs':
                     return self.send(200, {

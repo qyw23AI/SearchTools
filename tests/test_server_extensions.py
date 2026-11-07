@@ -221,6 +221,50 @@ class ServerExtensionTests(unittest.TestCase):
         self.assertEqual(after['deeptutor_info']['llm_provider'], 'deepseek')
         self.assertEqual(after['deeptutor_info']['llm_model'], 'deepseek-flash')
 
+    def test_active_project_api(self):
+        # 1. Initial active project should be test project or empty
+        res = self._req('/api/active-project')
+        self.assertIn('project', res)
+
+        # 2. Set active project via POST
+        p2 = self.app.store.create_project('第二个课题')
+        post_res = self._req('/api/active-project', data={'project': p2})
+        self.assertTrue(post_res.get('ok'))
+        self.assertEqual(post_res.get('project'), p2)
+
+        # 3. GET should return updated active project
+        get_res = self._req('/api/active-project')
+        self.assertEqual(get_res.get('project'), p2)
+
+    def test_history_api_and_trace_logging(self):
+        # 1. Import a paper so we can enqueue jobs
+        self.app.store.import_paper(self.project_id, 'doc.txt', b'Machine Learning Robotics Content')
+
+        # 2. Enqueue an ask job
+        job_res = self._req('/api/jobs', data={
+            'project': self.project_id,
+            'kind': 'ask',
+            'prompt': '机器人连续控制核心机制是什么？',
+            'source': 'local'
+        })
+        jid = job_res['id']
+        self.assertTrue(jid)
+
+        # 3. Verify a running trace event was automatically logged
+        traces = self.app.store.list_traces(self.project_id)
+        self.assertTrue(len(traces) > 0)
+        self.assertEqual(traces[0]['tool'], 'job_ask')
+        self.assertEqual(traces[0]['status'], 'running')
+        self.assertIn(jid[:8], traces[0]['summary'])
+
+        # 4. Check GET /api/history returns the job with preview info
+        hist = self._req(f'/api/history?project={self.project_id}')
+        self.assertGreaterEqual(hist['total'], 1)
+        found = [j for j in hist['jobs'] if j['id'] == jid]
+        self.assertTrue(found)
+        self.assertEqual(found[0]['kind'], 'ask')
+        self.assertEqual(found[0]['prompt'], '机器人连续控制核心机制是什么？')
+
 
 if __name__ == '__main__':
     unittest.main()

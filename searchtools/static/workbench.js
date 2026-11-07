@@ -8,6 +8,27 @@
   let selectedCardIds = new Set();
   let cachedCards = [];
   let activeRunningJobId = '';
+  let activeEventSource = null;
+  let lastActiveJobCount = -1;
+  let lastTracesCount = -1;
+
+  // Cross-view synchronization via BroadcastChannel
+  let syncChannel = null;
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      syncChannel = new BroadcastChannel('searchtools_sync');
+      syncChannel.onmessage = async (ev) => {
+        const data = ev.data || {};
+        if (data.type === 'project-change' && data.projectId && data.projectId !== currentScopeId) {
+          await setCurrentScope(data.projectId, false);
+        } else if (data.type === 'job-updated') {
+          loadTraces();
+          loadCards();
+          loadHistory();
+        }
+      };
+    } catch (_) {}
+  }
 
   // Theme initialization from URL query or parent postMessage
   const params = new URLSearchParams(window.location.search);
@@ -19,7 +40,11 @@
     if (ev.data.type === 'st-theme') {
       document.documentElement.classList.toggle('dark', ev.data.theme === 'dark');
     } else if (ev.data.type === 'st-refresh') {
-      refreshAll();
+      if (ev.data.projectId && ev.data.projectId !== currentScopeId) {
+        setCurrentScope(ev.data.projectId, false);
+      } else {
+        refreshAll();
+      }
     }
   });
 
@@ -76,6 +101,31 @@
   // Scope selection & Creation
   const scopeSelect = document.getElementById('wb-scope-select');
 
+  async function setCurrentScope(pid, broadcast = true) {
+    if (!pid) return;
+    currentScopeId = pid;
+    if (scopeSelect) scopeSelect.value = pid;
+    localStorage.setItem('searchtools-project', pid);
+    try {
+      await api('/api/active-project', { method: 'POST', body: JSON.stringify({ project: pid }) });
+    } catch (_) {}
+    if (broadcast && syncChannel) {
+      try {
+        syncChannel.postMessage({ type: 'project-change', projectId: pid });
+      } catch (_) {}
+    }
+    selectedCardIds.clear();
+    updateBatchBar();
+    connectEventStream();
+    await Promise.all([
+      loadCards(),
+      loadScopeDetail(),
+      loadCandidateBatches(),
+      loadTraces(),
+      loadHistory()
+    ]);
+  }
+
   async function promptCreateScope() {
     const name = window.prompt('请输入新研究范围名称（如：具身智能避障、四足越障控制等）：');
     if (!name || !name.trim()) {
@@ -85,7 +135,7 @@
     try {
       showToast('正在创建新研究范围...');
       const res = await api('/api/scope/create', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
-      currentScopeId = res.scope_id;
+      await setCurrentScope(res.scope_id, true);
       showToast(`已创建研究范围：${name.trim()}`);
       await refreshAll();
     } catch (e) {
@@ -104,13 +154,7 @@
       await promptCreateScope();
       return;
     }
-    currentScopeId = scopeSelect.value;
-    selectedCardIds.clear();
-    updateBatchBar();
-    loadCards();
-    loadScopeDetail();
-    loadCandidateBatches();
-    loadTraces();
+    await setCurrentScope(scopeSelect.value, true);
   });
 
   document.getElementById('wb-btn-refresh').addEventListener('click', () => {
@@ -127,8 +171,21 @@
       ]);
 
       scopesList = stState.projects || [];
-      if (!currentScopeId && scopesList.length > 0) {
-        currentScopeId = scopesList[scopesList.length - 1].id;
+      if (!currentScopeId) {
+        const storedPid = localStorage.getItem('searchtools-project');
+        if (storedPid && scopesList.some((p) => p.id === storedPid)) {
+          currentScopeId = storedPid;
+        } else {
+          try {
+            const act = await api('/api/active-project');
+            if (act.project && scopesList.some((p) => p.id === act.project)) {
+              currentScopeId = act.project;
+            }
+          } catch (_) {}
+        }
+        if (!currentScopeId && scopesList.length > 0) {
+          currentScopeId = scopesList[0].id;
+        }
       }
       scopeSelect.innerHTML =
         scopesList
@@ -220,6 +277,135 @@
     } catch (e) {
       console.warn('loadTraces error:', e);
     }
+  }
+
+  // ==================== Tab 2: Question & Retrieval History ====================
+  let cachedHistoryJobs = [];
+
+  async function loadHistory() {
+    if (!currentScopeId) return;
+    try {
+      const res = await api(`/api/history?project=${encodeURIComponent(currentScopeId)}`);
+      cachedHistoryJobs = res.jobs || [];
+      const badge = document.getElementById('wb-badge-history');
+      if (badge) badge.textContent = String(cachedHistoryJobs.length);
+      renderHistoryList();
+    } catch (e) {
+      console.warn('loadHistory error:', e);
+    }
+  }
+
+  function renderHistoryList() {
+    const el = document.getElementById('wb-history-list');
+    if (!el) return;
+    if (!cachedHistoryJobs || cachedHistoryJobs.length === 0) {
+      el.innerHTML = `<div class="wb-card"><div class="wb-hint">当前研究范围暂无问答或检索记录。可以在 SearchTools 工作区 PaperQA2 界面提问，或在「研究范围」下方直接提问。</div></div>`;
+      return;
+    }
+
+    const kindLabels = {
+      ask: '论文问答',
+      evidence: '证据检索',
+      coverage: '覆盖度检查',
+      research: '深度调研',
+      index: '索引构建',
+    };
+
+    el.innerHTML = cachedHistoryJobs
+      .map((j) => {
+        const dt = new Date((j.created || 0) * 1000);
+        const timeStr = dt.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const st = j.status || 'done';
+        const badgeCls = st === 'done' ? 'ok' : st === 'waiting' || st === 'running' || st === 'queued' ? 'warn' : 'err';
+        const kindLabel = kindLabels[j.kind] || j.kind;
+        const cardsBadge = j.cards_count > 0 ? `<span class="wb-badge ok" style="margin-left:4px;">🗂️ ${j.cards_count} 张证据卡</span>` : '';
+
+        return `
+          <div class="wb-card" data-job-id="${esc(j.id)}">
+            <div class="wb-card-header">
+              <span class="wb-badge" style="background:#e0e7ff;color:#3730a3;font-weight:600;">${esc(kindLabel)}</span>
+              <span class="wb-card-title" style="flex:1;margin:0 8px;font-size:13px;font-weight:600;color:var(--text);">${esc(j.prompt || '问答任务')}</span>
+              <span class="wb-badge ${badgeCls}">${esc(st)}</span>
+            </div>
+            <div class="wb-card-meta">
+              <code>${esc(j.id.slice(0, 8))}</code> · ${esc(timeStr)}${cardsBadge}
+            </div>
+            ${
+              j.answer_preview
+                ? `
+              <div class="wb-summary" style="margin-top:8px;">
+                <strong>回答要点：</strong>${esc(j.answer_preview)}...
+              </div>
+              <div class="wb-btn-group" style="margin-top:8px;">
+                <button class="wb-btn wb-btn-primary wb-btn-xs btn-insert-dt-ans" data-job-id="${esc(j.id)}">✍️ 插入 DeepTutor</button>
+                <button class="wb-btn wb-btn-secondary wb-btn-xs btn-copy-ans" data-job-id="${esc(j.id)}">📋 复制回答</button>
+                <button class="wb-btn wb-btn-secondary wb-btn-xs btn-filter-cards" data-job-id="${esc(j.id)}">🔍 查看证据卡 (${j.cards_count})</button>
+              </div>
+            `
+                : st === 'running' || st === 'queued' || st === 'waiting'
+                ? `
+              <div class="wb-hint" style="margin-top:6px;">⏳ 任务正在执行中: ${esc(j.message || '请稍候...')}</div>
+            `
+                : j.message
+                ? `<div class="wb-badge err" style="margin-top:6px;">${esc(j.message)}</div>`
+                : ''
+            }
+          </div>
+        `;
+      })
+      .join('');
+
+    // Bind action buttons
+    el.querySelectorAll('.btn-insert-dt-ans').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const jid = btn.dataset.jobId;
+        try {
+          const jobDetail = await api(`/api/job?id=${encodeURIComponent(jid)}`);
+          const ans = jobDetail?.result?.answer || jobDetail?.result?.formatted_answer || '';
+          if (ans) {
+            insertTextToHost(`> **[PaperQA2 实证回答] 问题**: ${jobDetail.prompt}\n\n${ans}\n\n`);
+          } else {
+            showToast('该任务无可用回答文本');
+          }
+        } catch (err) {
+          showToast('获取回答失败: ' + err.message);
+        }
+      });
+    });
+
+    el.querySelectorAll('.btn-copy-ans').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const jid = btn.dataset.jobId;
+        try {
+          const jobDetail = await api(`/api/job?id=${encodeURIComponent(jid)}`);
+          const ans = jobDetail?.result?.answer || jobDetail?.result?.formatted_answer || '';
+          if (ans) {
+            await navigator.clipboard.writeText(`> **问题**: ${jobDetail.prompt}\n\n${ans}`);
+            showToast('已复制回答全文到剪贴板');
+          }
+        } catch (err) {
+          showToast('复制失败: ' + err.message);
+        }
+      });
+    });
+
+    el.querySelectorAll('.btn-filter-cards').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cardsTab = document.querySelector('.wb-tab[data-tab="cards"]');
+        if (cardsTab) cardsTab.click();
+      });
+    });
+  }
+
+  const refreshHistoryBtn = document.getElementById('wb-btn-refresh-history');
+  if (refreshHistoryBtn) {
+    refreshHistoryBtn.addEventListener('click', () => {
+      loadHistory();
+      showToast('已刷新问答历史');
+    });
   }
 
   document.getElementById('wb-job-cancel').addEventListener('click', async () => {
@@ -539,6 +725,10 @@
             }
             loadCards();
             loadTraces();
+            loadHistory();
+            if (syncChannel) {
+              try { syncChannel.postMessage({ type: 'job-updated', projectId: currentScopeId }); } catch (_) {}
+            }
           } else if (j.status === 'failed' || j.status === 'cancelled') {
             clearInterval(poll);
             outEl.innerHTML = `<div class="wb-badge err">执行失败: ${esc(j.message)}</div>`;
@@ -699,21 +889,38 @@
 
   // SSE stream for real-time trace & job updates
   function connectEventStream() {
+    if (activeEventSource) {
+      try { activeEventSource.close(); } catch (_) {}
+      activeEventSource = null;
+    }
+    if (!currentScopeId) return;
     try {
       const es = new EventSource(`/api/events?scope_id=${encodeURIComponent(currentScopeId)}`);
+      activeEventSource = es;
       es.onmessage = (ev) => {
         try {
           const data = JSON.parse(ev.data);
-          renderTraces(data.traces || [], data.active_jobs || []);
+          const activeJobs = data.active_jobs || [];
+          const traces = data.traces || [];
+          renderTraces(traces, activeJobs);
           if (data.pending_batches) {
             const cnt = data.pending_batches.reduce((a, b) => a + (b.candidates || []).length, 0);
             document.getElementById('wb-badge-acquire').textContent = String(cnt);
           }
+          if ((lastActiveJobCount > 0 && activeJobs.length === 0) || (lastTracesCount >= 0 && traces.length !== lastTracesCount)) {
+            loadCards();
+            loadHistory();
+          }
+          lastActiveJobCount = activeJobs.length;
+          lastTracesCount = traces.length;
         } catch (_) {}
       };
       es.onerror = () => {
         es.close();
-        setTimeout(connectEventStream, 5000);
+        if (activeEventSource === es) {
+          activeEventSource = null;
+          setTimeout(connectEventStream, 5000);
+        }
       };
     } catch (_) {}
   }
@@ -741,7 +948,14 @@
   async function refreshAll() {
     await loadHeaderStatus();
     await checkZoteroPluginStatus();
-    await Promise.all([loadTraces(), loadCards(), loadScopeDetail(), loadCandidateBatches(), loadZoteroCollectionsDropdown()]);
+    await Promise.all([
+      loadTraces(),
+      loadCards(),
+      loadScopeDetail(),
+      loadCandidateBatches(),
+      loadZoteroCollectionsDropdown(),
+      loadHistory(),
+    ]);
   }
 
   refreshAll().then(() => {

@@ -84,10 +84,16 @@
     btn.textContent = isOpen ? '✕ 收起工作台' : '⚖️ 证据工作台';
     if (isOpen && iframe.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'st-theme', theme: currentTheme() }, '*');
-      iframe.contentWindow.postMessage({ type: 'st-refresh' }, '*');
+      iframe.contentWindow.postMessage({ type: 'st-refresh', projectId: localStorage.getItem('searchtools-project') || '' }, '*');
     }
   }
   btn.addEventListener('click', () => toggleDrawer());
+
+  window.__stSyncDrawerNow = function() {
+    if (isOpen && iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ type: 'st-refresh', projectId: localStorage.getItem('searchtools-project') || '' }, '*');
+    }
+  };
 
   // Drag resize
   const resizer = drawer.querySelector('#st-wb-resizer');

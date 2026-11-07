@@ -353,6 +353,9 @@ window.AskPage = (function() {
             options: options
           });
           toast('问答任务已启动并在后台执行');
+          if (window.syncChannel) {
+            try { window.syncChannel.postMessage({ type: 'job-updated', projectId }); } catch (_) {}
+          }
           await load(false);
           activeJob = await api('/api/job?id=' + res.id);
           updateUI();
@@ -581,6 +584,9 @@ window.AskPage = (function() {
         }
       } else {
         // Job just finished (done / failed / cancelled)! Reload project state and index status, then render full result
+        if (window.syncChannel) {
+          try { window.syncChannel.postMessage({ type: 'job-updated', projectId }); } catch (_) {}
+        }
         await load(false);
         await loadData();
         updateUI();
