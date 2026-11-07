@@ -487,13 +487,33 @@ def handler(app):
 
                 # Evidence Cards CRUD and Citation Formatting
                 if self.path == '/api/evidence-cards/save':
-                    cid = app.store.save_evidence_card(data['project'], data.get('card', {}))
+                    pid = data.get('project')
+                    if not pid:
+                        projs = app.store.rows('SELECT id FROM projects ORDER BY created DESC LIMIT 1')
+                        pid = projs[0]['id'] if projs else app.store.create_project('学术实证课题')
+                    cid = app.store.save_evidence_card(pid, data.get('card', {}))
                     return self.send(200, {'ok': True, 'id': cid})
                 if self.path == '/api/evidence-cards/remove':
-                    app.store.remove_evidence_card(data['project'], data['id'])
+                    cid = str(data.get('id') or '').strip()
+                    pid = data.get('project')
+                    if not pid and cid:
+                        r = app.store.rows('SELECT project FROM evidence_cards WHERE id=?', (cid,))
+                        if r:
+                            pid = r[0]['project']
+                    if not pid or not cid:
+                        return self.send(400, {'ok': False, 'error': 'Missing project or card id'})
+                    app.store.remove_evidence_card(pid, cid)
                     return self.send(200, {'ok': True})
                 if self.path == '/api/evidence-cards/pin':
-                    pinned = app.store.toggle_pin_evidence_card(data['project'], data['id'])
+                    cid = str(data.get('id') or '').strip()
+                    pid = data.get('project')
+                    if not pid and cid:
+                        r = app.store.rows('SELECT project FROM evidence_cards WHERE id=?', (cid,))
+                        if r:
+                            pid = r[0]['project']
+                    if not pid or not cid:
+                        return self.send(400, {'ok': False, 'error': 'Missing project or card id'})
+                    pinned = app.store.toggle_pin_evidence_card(pid, cid)
                     return self.send(200, {'ok': True, 'pinned': pinned})
                 if self.path == '/api/evidence-cards/format':
                     formatted = app.store.format_evidence_cards_citation(
