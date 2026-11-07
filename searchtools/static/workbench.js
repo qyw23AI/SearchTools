@@ -718,10 +718,34 @@
     } catch (_) {}
   }
 
+  async function checkZoteroPluginStatus() {
+    const el = document.getElementById('wb-zotero-status');
+    if (!el) return;
+    try {
+      const res = await api('/api/zotero/actions?status=1');
+      if (res && res.connected) {
+        el.className = 'wb-badge ok';
+        el.textContent = '🟢 Zotero 在线';
+        el.title = 'Zotero 插件已就绪：点击卡片可直接翻至对应页码并高亮论据！';
+      } else {
+        el.className = 'wb-badge warn';
+        el.textContent = '⚪ Zotero 离线';
+        el.title = 'Zotero 未运行或插件未启用，点击卡片将尝试协议直连。';
+      }
+    } catch (_) {
+      el.className = 'wb-badge warn';
+      el.textContent = '⚪ 插件离线';
+    }
+  }
+
   async function refreshAll() {
     await loadHeaderStatus();
+    await checkZoteroPluginStatus();
     await Promise.all([loadTraces(), loadCards(), loadScopeDetail(), loadCandidateBatches(), loadZoteroCollectionsDropdown()]);
   }
 
-  refreshAll().then(() => connectEventStream());
+  refreshAll().then(() => {
+    connectEventStream();
+    setInterval(checkZoteroPluginStatus, 3000);
+  });
 })();
