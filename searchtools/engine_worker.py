@@ -367,22 +367,45 @@ def main():
             session = asyncio.run(run_resilient_paperqa(job, settings, llm_model, emb_model))
 
             contexts = []
+            cutoff_score = max(5, getattr(getattr(settings, 'answer', None), 'evidence_relevance_score_cutoff', 5) or 5)
             for c in (getattr(session, 'contexts', None) or []):
                 doc = getattr(getattr(c, 'text', None), 'doc', None)
                 t_name = getattr(getattr(c, 'text', None), 'name', '') or ''
                 page_m = re.search(r'pages?\s*(\d+(?:-\d+)?)', t_name, re.I)
                 page_val = page_m.group(1) if page_m else ''
+                c_score = float(getattr(c, 'score', 0) or 0)
+                c_summary = (getattr(c, 'context', '') or '').strip()
+                c_text = (getattr(getattr(c, 'text', None), 'text', '') or getattr(c, 'context', '') or '').strip()
+                c_claim = getattr(c, 'claim', '') or getattr(c, 'extra', {}).get('claim', '') or ''
+
+                # Strict grounding & noise check: filter out bibliography chunks and irrelevant negative responses
+                low_sum = c_summary.lower()
+                is_bib_or_negative = (
+                    'bibliography' in low_sum
+                    or ('references' in low_sum and len(low_sum) < 140)
+                    or 'is a list of references' in low_sum
+                    or 'does not contain' in low_sum
+                    or 'does not provide' in low_sum
+                    or 'not applicable' in low_sum
+                    or 'irrelevant' in low_sum
+                )
+                if c_score < cutoff_score or is_bib_or_negative or not c_summary:
+                    continue
+
                 contexts.append({
                     'id': getattr(c, 'id', ''),
-                    'summary': getattr(c, 'context', ''),
-                    'text': getattr(getattr(c, 'text', None), 'text', '') or getattr(c, 'context', ''),
-                    'score': getattr(c, 'score', 0),
+                    'claim': c_claim,
+                    'summary': c_summary,
+                    'text': c_text,
+                    'score': c_score,
                     'name': t_name,
                     'page': page_val,
                     'citation': getattr(doc, 'citation', '') or t_name,
                     'title': getattr(doc, 'title', '') or t_name,
                     'docname': getattr(doc, 'docname', ''),
                 })
+
+            contexts.sort(key=lambda x: x['score'], reverse=True)
 
             formatted = getattr(session, 'formatted_answer', '') or getattr(session, 'answer', '')
             if job['kind'] == 'evidence':

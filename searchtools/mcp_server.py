@@ -112,7 +112,10 @@ def _wait_for_job(job_id: str, wait_seconds: int = 85) -> dict:
             cards = store.list_evidence_cards(job['project'])
             job_cards = [c for c in cards if c.get('job_id') == job_id]
             if not job_cards and result.get('contexts'):
-                job_cards = store.extract_and_save_evidence_from_result(job['project'], job_id, result, claim=job.get('prompt'))
+                job_cards = store.extract_and_save_evidence_from_result(
+                    job['project'], job_id, result,
+                    claim=job.get('prompt') if job.get('kind') == 'verify' else None
+                )
             store.log_trace(job['project'], f"job_{job['kind']}", 'done',
                             f"任务完成 [{job_id[:8]}]: 提取 {len(job_cards)} 张证据卡", {'job_id': job_id, 'cards_count': len(job_cards)})
             return {'completed': True, 'job': job, 'result': result, 'cards': job_cards}
@@ -135,11 +138,13 @@ def _format_card_markdown(c: dict, idx: int | None = None) -> str:
     ck = src.get('citekey') or ''
     zlink = src.get('zotero_link') or ''
     link_md = f" · [在 Zotero 打开原文]({zlink})" if zlink else ""
+    claim_line = f"- **支撑论点**: {c.get('claim')}\n" if c.get('claim') else ""
     return (
         f"{prefix} **{src.get('title') or c.get('title')}** ({authors}, {yr}{pg}) "
         f"[citekey: `{ck}` | Zotero: `{src.get('item_key')}` | 评分: {c.get('score')}/10]{link_md}\n"
-        f"- **论据摘要**: {c.get('summary')}\n"
-        f"- **原文引文**: “{str(c.get('quote') or '').strip()}”"
+        f"{claim_line}"
+        f"- **论据提炼**: {c.get('summary')}\n"
+        f"- **原文论据**: “{str(c.get('quote') or '').strip()}”"
     )
 
 
@@ -247,7 +252,7 @@ def gather_evidence(
     question: str,
     scope_id: str = "",
     k: int = 8,
-    min_score: int = 3,
+    min_score: int = 5,
     wait_seconds: int = 85,
     force_refresh: bool = False,
 ) -> str:
@@ -281,7 +286,7 @@ def gather_evidence(
         opts = {
             'preset': 'fast',
             'evidence_k': max(3, min(int(k or 6), 10)),
-            'evidence_relevance_score_cutoff': max(1, min(int(min_score or 3), 9)),
+            'evidence_relevance_score_cutoff': max(5, min(int(min_score or 5), 9)),
         }
         outcome = _enqueue_and_wait(sid, 'evidence', question, options=opts, wait_seconds=wait_seconds)
         if not outcome['completed']:

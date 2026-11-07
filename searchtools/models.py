@@ -367,7 +367,26 @@ PRESETS = {
 }
 DEFAULT_INDEX = {'chunk_chars': 5000, 'overlap': 250, 'multimodal': False, 'use_doc_details': False}
 DEFAULT_PARAMS = {'temperature': 0.0, 'num_ctx': 8192, 'think': False, 'preset': 'balanced',
-                  'evidence_relevance_score_cutoff': 1, 'answer_language': 'auto'}
+                  'evidence_relevance_score_cutoff': 5, 'answer_language': 'auto'}
+
+ACADEMIC_SUMMARY_JSON_SYSTEM_PROMPT = (
+    "You are an expert academic research assistant extracting evidence from paper excerpts to answer a research question.\n"
+    "Respond strictly with the following JSON format:\n"
+    "{{\n"
+    '  "claim": "A concise atomic factual claim or proposition directly substantiated by this excerpt",\n'
+    '  "summary": "Specific factual summary with numbers, metrics, or methods ({summary_length})",\n'
+    '  "relevance_score": 0-10\n'
+    "}}\n\n"
+    "CRITICAL GROUNDING & NOISE FILTERING RULES:\n"
+    "1. BIBLIOGRAPHY / METADATA HARD STOP: If the excerpt is from a References / Bibliography section, citation list, author affiliations, acknowledgments, or publication header, you MUST output:\n"
+    '{{"claim": "", "summary": "", "relevance_score": 0}}\n'
+    "Never summarize reference entries or cite keys.\n"
+    "2. NO RELEVANT EVIDENCE: If the excerpt does not contain concrete facts, empirical data, formulas, or methods directly addressing the question, output:\n"
+    '{{"claim": "", "summary": "", "relevance_score": 0}}\n'
+    "3. STRICT ATOMIC CLAIM: `claim` must be a single, standalone declarative statement directly substantiated by the text. Never echo the user\'s question as the claim.\n"
+    "4. NO HALLUCINATION: Never extrapolate or introduce facts, numbers, or conclusions not explicitly written in the excerpt.\n"
+    "5. SCORING (0-10): Only excerpts with direct, high-value empirical or methodological evidence should score >= 6. Weak or tangential mentions score 1-4. Irrelevant/noise excerpts MUST score 0."
+)
 
 
 def default_catalog():
@@ -690,6 +709,10 @@ def build_paperqa_settings(data, options=None):
         'summary_llm': summ, 'summary_llm_config': summ_cfg,
         'embedding': litellm_name(emb_conn, emb_model), 'embedding_config': {'kwargs': emb_kwargs},
         'temperature': params['temperature'],
+        'prompts': {
+            'summary_json_system': ACADEMIC_SUMMARY_JSON_SYSTEM_PROMPT,
+            'use_json': True,
+        },
         'parsing': {'multimodal': index['multimodal'], 'use_doc_details': index['use_doc_details'],
                     'reader_config': {'chunk_chars': index['chunk_chars'], 'overlap': index['overlap']},
                     'disable_doc_valid_check': True,

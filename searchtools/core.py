@@ -805,6 +805,35 @@ class Store:
                 else (f"zotero://open-pdf/library/items/{att_key}" if att_key
                       else (f"zotero://select/library/items/{zot_key}" if zot_key else ""))
             )
+            score_val = float(ctx.get('score') or 0)
+            summary_txt = (ctx.get('summary') or '').strip()
+            quote_txt = (ctx.get('text') or ctx.get('quote') or '').strip()
+
+            # Filter out bibliography/references and irrelevant negative chunks
+            low_sum = summary_txt.lower()
+            if score_val < 5.0 or not summary_txt or not quote_txt:
+                continue
+            if any(k in low_sum for k in ('bibliography', 'is a list of references', 'does not contain', 'does not provide', 'not applicable', 'irrelevant')):
+                continue
+
+            # Align Claim & Quote:
+            # 1. If explicit claim was passed from outside (e.g. verify_claim), use it.
+            # 2. If the context carries a model-extracted atomic claim, use it.
+            # 3. Otherwise, extract the atomic proposition from the first sentence of summary.
+            # 4. Fallback to concise prompt question, avoiding long compound multi-aspect questions.
+            card_claim = ''
+            if claim and len(str(claim).strip()) > 0:
+                card_claim = str(claim).strip()
+            elif ctx.get('claim') and len(str(ctx['claim']).strip()) > 0:
+                card_claim = str(ctx['claim']).strip()
+            else:
+                first_sent = re.split(r'[。！？.!?\n]', summary_txt)[0].strip()
+                if len(first_sent) >= 8 and len(first_sent) <= 160:
+                    card_claim = first_sent
+                else:
+                    q_raw = str(result_data.get('question') or '').strip()
+                    card_claim = q_raw[:120] if q_raw else '学术实证断言'
+
             citation = ctx.get('citation') or title_val
             card = {
                 'job_id': job_id,
@@ -819,10 +848,10 @@ class Store:
                 'doi': doi_val,
                 'title': title_val,
                 'page': page_val,
-                'quote': ctx.get('text') or ctx.get('quote') or '',
-                'summary': ctx.get('summary') or '',
-                'claim': claim or result_data.get('question') or '',
-                'score': float(ctx.get('score') or 0),
+                'quote': quote_txt,
+                'summary': summary_txt,
+                'claim': card_claim,
+                'score': score_val,
                 'pinned': 0,
                 'tags': ''
             }

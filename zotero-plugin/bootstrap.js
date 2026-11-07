@@ -154,7 +154,10 @@ async function handleCardOpen(cardId) {
 }
 
 async function highlightAndOpenCard(cardData) {
-  if (!cardData || !cardData.card_id) return;
+  if (!cardData) return;
+  let cardId = cardData.card_id || cardData.id;
+  if (!cardId) return;
+
   await waitForZotero();
   let userLibraryID = Zotero.Libraries.userLibraryID;
   let attKey = cardData.attachment_key;
@@ -169,23 +172,28 @@ async function highlightAndOpenCard(cardData) {
     if (parentItem) {
       let attIds = parentItem.getAttachments();
       if (attIds && attIds.length) {
-        attachment = await Zotero.Items.getAsync(attIds[0]);
+        attachment = await Zotero.Items.getAsync(parseInt(attIds[0]));
       }
     }
   }
 
   if (!attachment || !attachment.isFileAttachment()) {
-    log(`Attachment item not found for card ${cardData.card_id} (att: ${attKey}, zot: ${zotKey})`);
-    showToast('⚠️ 未找到 PDF 附件', `卡片 ${cardData.card_id} 关联的附件不存在`);
+    log(`Attachment item not found for card ${cardId} (att: ${attKey}, zot: ${zotKey})`);
+    showToast('⚠️ 未找到 PDF 附件', `卡片 ${cardId} 关联的附件不存在`);
     return;
   }
 
   let pageIndex = parseInt(cardData.page_index != null ? cardData.page_index : 0);
   let pageLabel = String(cardData.page_label || (pageIndex + 1));
   let rects = cardData.rects || [];
+  if ((!rects || rects.length === 0) && cardData.rects_json) {
+    try {
+      rects = typeof cardData.rects_json === 'string' ? JSON.parse(cardData.rects_json) : cardData.rects_json;
+    } catch (e) {}
+  }
 
   // Check if temporary annotation already exists for this card
-  let cardTag = '#card-' + cardData.card_id;
+  let cardTag = '#card-' + cardId;
   let annots = attachment.getAnnotations ? attachment.getAnnotations() : [];
   let targetAnnot = null;
   for (let a of annots) {
@@ -208,7 +216,7 @@ async function highlightAndOpenCard(cardData) {
       targetAnnot.annotationType = 'highlight';
       targetAnnot.annotationText = cardData.quote || '';
       targetAnnot.annotationComment =
-        `【论证支撑证据卡 ${cardData.card_id}】\n要点：${cardData.summary || ''}\n置信度评分：${cardData.score || 8.5}/10`;
+        `【论证支撑证据卡 ${cardId}】\n要点：${cardData.summary || ''}\n置信度评分：${cardData.score || 8.5}/10`;
       targetAnnot.annotationColor = '#ffd400'; // Gold yellow
       targetAnnot.annotationPageLabel = pageLabel;
       targetAnnot.annotationSortIndex = sortIndex;
@@ -237,7 +245,7 @@ async function highlightAndOpenCard(cardData) {
   log(`Opening file attachment ${attachment.key} (id: ${attachment.id}) at pageIndex ${pageIndex}, annot: ${location.annotationID || 'none'}`);
   await Zotero.Reader.open(attachment.id, location);
 
-  showToast('🎯 论据定位完成', `第 ${pageLabel} 页 · ${cardData.card_id}`);
+  showToast('🎯 论据定位完成', `第 ${pageLabel} 页 · ${cardId}`);
 
   let win = Zotero.getMainWindow();
   if (win && win.focus) {
@@ -248,16 +256,32 @@ async function highlightAndOpenCard(cardData) {
 async function cleanupTempAnnotations() {
   try {
     await waitForZotero();
-    let sql = `
-      SELECT itemID FROM itemTags 
-      JOIN tags USING (tagID) 
-      WHERE name = '#evidence-temp'
-    `;
-    let ids = await Zotero.DB.columnQueryAsync(sql);
-    let count = ids ? ids.length : 0;
+    log('cleanupTempAnnotations started');
+    let count = 0;
+
+    // Direct and reliable: inspect annotations in library
+    try {
+      let annotIds = await Zotero.DB.columnQueryAsync('SELECT itemID FROM itemAnnotations');
+      log(`cleanupTempAnnotations: inspecting ${annotIds ? annotIds.length : 0} total annotations in library`);
+      for (let rawId of (annotIds || [])) {
+        let intId = parseInt(rawId);
+        try {
+          let it = await Zotero.Items.getAsync(intId);
+          if (it && it.hasTag && (it.hasTag('#evidence-temp') || it.hasTag('evidence-temp'))) {
+            log(`cleanupTempAnnotations: found temporary annotation ${it.id} (${it.key}), erasing...`);
+            await it.eraseTx();
+            count++;
+          }
+        } catch (itemErr) {
+          log(`Error inspecting annotation item ${intId}: ${itemErr}`);
+        }
+      }
+    } catch (annotErr) {
+      log(`Error querying itemAnnotations: ${annotErr}`);
+    }
+
+    log(`Cleaned up ${count} temporary evidence annotations`);
     if (count > 0) {
-      await Zotero.Items.erase(ids);
-      log(`Cleaned up ${count} temporary evidence annotations`);
       showToast('🧹 临时高亮已清理', `已成功清除 ${count} 条证据高亮标注，文库已恢复整洁`);
     } else {
       showToast('🧹 临时高亮已清理', '当前没有需要清理的临时高亮标注');
@@ -282,7 +306,7 @@ async function createChildNoteForItem(parentItem, card, bibEntry) {
   let childNoteIds = parentItem.getNotes ? parentItem.getNotes() : [];
   let existingNote = null;
   for (let nId of childNoteIds) {
-    let noteItem = await Zotero.Items.getAsync(nId);
+    let noteItem = await Zotero.Items.getAsync(parseInt(nId));
     if (noteItem && noteItem.hasTag && noteItem.hasTag(cardTag)) {
       existingNote = noteItem;
       break;
@@ -377,7 +401,7 @@ async function createCardFromSelection(reader, selectedText, pageIndex) {
     let attachment = reader._item || reader.item;
     let parentItem = null;
     if (attachment && attachment.parentID) {
-      parentItem = await Zotero.Items.getAsync(attachment.parentID);
+      parentItem = await Zotero.Items.getAsync(parseInt(attachment.parentID));
     }
     let pIdx = pageIndex != null ? pageIndex : (reader._internalReader?.pageIndex || 0);
     let pageLabel = String(pIdx + 1);
@@ -419,6 +443,7 @@ async function createCardFromSelection(reader, selectedText, pageIndex) {
 // ItemPane Section Synchronous Render
 function renderEvidenceSectionSync(doc, body, item) {
   body.innerHTML = '';
+  doc = body.ownerDocument || doc;
 
   let container = doc.createElement('div');
   container.className = 'evidence-bridge-section-container';
@@ -442,7 +467,7 @@ function renderEvidenceSectionSync(doc, body, item) {
   btnWb.title = '在独立浏览器中打开完整实证卡工作台';
   btnWb.style.cssText = 'background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer; color: #334155;';
   btnWb.onclick = () => {
-    let targetKey = item ? (item.isAttachment() && item.parentID ? item.parentItem?.key : item.key) : '';
+    let targetKey = item ? (item.isAttachment && item.isAttachment() && item.parentID ? item.parentItem?.key : item.key) : '';
     Zotero.launchURL(`${SEARCHTOOLS_HOST}/workbench.html${targetKey ? '?q=' + encodeURIComponent(targetKey) : ''}`);
   };
   headerActions.appendChild(btnWb);
@@ -482,11 +507,12 @@ async function renderEvidenceSectionAsync(doc, body, item, setSectionSummary) {
   let listContainer = body.querySelector('#evidence-bridge-cards-list');
   let titleBadge = body.querySelector('#evidence-bridge-title-badge');
   if (!listContainer) return;
+  doc = body.ownerDocument || doc;
 
   let targetItem = item;
   if (item && item.isAttachment && item.isAttachment() && item.parentID) {
     try {
-      targetItem = await Zotero.Items.getAsync(item.parentID);
+      targetItem = await Zotero.Items.getAsync(parseInt(item.parentID));
     } catch (e) {}
   }
 
@@ -791,6 +817,7 @@ function startActionPoller() {
             await handleCardOpen(act.card_id);
           }
         } else if (act.action === 'cleanup') {
+          log('Poller received cleanup action');
           await cleanupTempAnnotations();
         }
       }
@@ -909,7 +936,7 @@ async function startup(data, reason) {
   dump(`[Evidence Bridge] Starting SearchTools Evidence Bridge v${version}...\n`);
 
   await waitForZotero();
-  log(`Zotero initialized, registering bridge hooks...`);
+  log(`Zotero initialized, DataDir: ${Zotero.DataDirectory ? Zotero.DataDirectory.dir : 'unknown'}, registering bridge hooks...`);
 
   // Register Chrome locale resources for FTL
   try {
