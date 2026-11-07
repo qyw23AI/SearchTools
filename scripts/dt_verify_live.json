@@ -1,0 +1,55 @@
+{
+  "status": "completed",
+  "timestamp": 1794030295.7760744,
+  "repaired_legacy_cards": [
+    "ec-942a641d4e81",
+    "ec-157a3fa56196",
+    "ec-64a499fee3a7",
+    "ec-15e851c2fae6",
+    "ec-e825afa6a5e9",
+    "ec-dd03c6ab103e",
+    "ec-26a458e16088",
+    "ec-9c30ac7a9f32",
+    "ec-ae3737ea4e7a",
+    "ev_36d55d8307"
+  ],
+  "cards_cite_output": {
+    "style": "gbt7714",
+    "inline": "[1, p.1-2][2][2]",
+    "inline_list": [
+      "[1, p.1-2]",
+      "[2]",
+      "[2]"
+    ],
+    "bibliography": "[1] 肖云发, 韩芳, 王青云. 基于脉冲强化学习和CPG的四足机器人分层运动控制[J]. 控制与决策, 2025, 40(7): 2070-2078. DOI:10.13195/j.kzyjc.2024.1029.\n[2] 陈鼎, 彭佩玺, 李国齐, 等. 脉冲强化学习算法研究综述[J]. 计算机学报, 2023.",
+    "bibtex": "@article{XiaoJiYuMaiChongQiangHuaXueXiHeCPGDeSiZuJiQiRenFenCengYunDongKongZhi2025,\n  author = {云发 肖 and 芳 韩 and 青云 王},\n  title = {基于脉冲强化学习和CPG的四足机器人分层运动控制},\n  journal = {控制与决策},\n  year = {2025},\n  doi = {10.13195/j.kzyjc.2024.1029}\n}\n\n@article{chen2023脉冲强化学习,\n  author = {陈鼎 and 彭佩玺 and 李国齐 and 田永鸿},\n  title = {脉冲强化学习算法研究综述},\n  journal = {计算机学报},\n  year = {2023},\n  doi = {}\n}",
+    "cards": [
+      {
+        "card_id": "ev_e840367cda",
+        "ref_index": 1,
+        "zotero_link": "zotero://open-pdf/library/items/8TEGCNID?page=1"
+      },
+      {
+        "card_id": "ec-e825afa6a5e9",
+        "ref_index": 2,
+        "zotero_link": "zotero://select/library/items/BNJ7QCGR"
+      },
+      {
+        "card_id": "ec-64a499fee3a7",
+        "ref_index": 2,
+        "zotero_link": "zotero://select/library/items/BNJ7QCGR"
+      }
+    ]
+  },
+  "zotero_writeback_results": [
+    {
+      "note_key": "XQGCDH5C",
+      "action": "updated",
+      "parent_key": "BNJ7QCGR",
+      "cards_count": 6
+    }
+  ],
+  "srl_session_id": "unified_1794029410273_e93773b2",
+  "srl_messages_count": 2,
+  "srl_last_msg_len": 15979
+}

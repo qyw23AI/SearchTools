@@ -56,7 +56,7 @@ class Desktop(Gtk.Application):
             if action=='reset':self.zoom_label=button
         header.pack_end(zoom_box)
         self.window.connect('key-press-event',self.key_press)
-        self.stack.connect('notify::visible-child',lambda *args:self.update_zoom_label())
+        self.stack.connect('notify::visible-child',self.on_visible_child_changed)
         self.window.add(self.stack)
         context=WebKit2.WebContext.get_default()
         context.set_network_proxy_settings(WebKit2.NetworkProxyMode.NO_PROXY,None)
@@ -66,6 +66,11 @@ class Desktop(Gtk.Application):
             manager=WebKit2.UserContentManager()
             if key=='workspace':
                 manager.add_script(WebKit2.UserScript.new('window.__SEARCHTOOLS_DESKTOP__=true;window.__SEARCHTOOLS_ZOOM_NATIVE__=true;',WebKit2.UserContentInjectedFrames.TOP_FRAME,WebKit2.UserScriptInjectionTime.START,None,None))
+            elif key=='deeptutor':
+                companion_path = ROOT/'searchtools/static/deeptutor_companion.js'
+                if companion_path.exists():
+                    companion_code = companion_path.read_text(encoding='utf-8')
+                    manager.add_script(WebKit2.UserScript.new(companion_code, WebKit2.UserContentInjectedFrames.TOP_FRAME, WebKit2.UserScriptInjectionTime.END, None, None))
             view=WebKit2.WebView.new_with_user_content_manager(manager)
             view.connect('decide-policy',self.policy)
             view.connect('load-failed',self.failed)
@@ -90,6 +95,16 @@ class Desktop(Gtk.Application):
         self.zoom_file.write_text(json.dumps(self.zoom_levels))
         self.update_zoom_label()
 
+    def on_visible_child_changed(self,*args):
+        self.update_zoom_label()
+        dt_view=self.views.get('deeptutor')
+        ws_view=self.views.get('workspace')
+        if dt_view:
+            dt_view.run_javascript('window.__stSyncModelNow && window.__stSyncModelNow()',None,None,None)
+        if ws_view and self.stack.get_visible_child() is ws_view:
+            ws_view.run_javascript('window.searchtoolsOnTabVisible && window.searchtoolsOnTabVisible()',None,None,None)
+            GLib.timeout_add(300,lambda:(ws_view.run_javascript('window.searchtoolsOnTabVisible && window.searchtoolsOnTabVisible()',None,None,None),False)[1])
+
     def update_zoom_label(self):
         view=self.stack.get_visible_child()
         if not view or not hasattr(self,'zoom_label'):return
@@ -99,8 +114,16 @@ class Desktop(Gtk.Application):
             view.run_javascript(f'window.searchtoolsSetZoom && window.searchtoolsSetZoom({level})',None,None,None)
 
     def key_press(self,window,event):
+        if event.keyval == Gdk.KEY_F5:
+            view = self.stack.get_visible_child()
+            if view: view.reload_bypass_cache()
+            return True
         if event.state & Gdk.ModifierType.CONTROL_MASK:
             key=Gdk.keyval_name(event.keyval)
+            if key in ('r','R'):
+                view = self.stack.get_visible_child()
+                if view: view.reload_bypass_cache()
+                return True
             action={'plus':'in','equal':'in','KP_Add':'in','minus':'out','KP_Subtract':'out','0':'reset','KP_0':'reset'}.get(key)
             if action:
                 self.zoom(action)
@@ -131,6 +154,11 @@ class Desktop(Gtk.Application):
                 return False
             Gio.AppInfo.launch_default_for_uri(uri,None)
             decision.ignore()
+            return True
+        if u.scheme=='zotero':
+            decision.ignore()
+            # Hand Zotero item & evidence links to the Zotero desktop app.
+            Gio.AppInfo.launch_default_for_uri(uri, None)
             return True
         if u.scheme=='mailto':
             Gio.AppInfo.launch_default_for_uri(uri,None)

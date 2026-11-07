@@ -1,0 +1,333 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import time
+import traceback
+from pathlib import Path
+from typing import Any
+
+OUT_DIR = Path("/home/qyw/文档/ChatGPT/科研学习相关工具搭建研究/scripts")
+VERIFY_FILE = OUT_DIR / "dt_verify_live.json"
+LIVE_FILE = OUT_DIR / "dt_turn_live.json"
+SRL_WORKSPACE_ID = "ws_f58357f93d8e428a930a2b8c42dce21b"
+TARGET_SESSION_ID = "unified_1794029410273_e93773b2"
+
+COMPREHENSIVE_PROPOSAL = """# 毕业设计（论文）开题报告
+
+**论文题目**：面向复杂障碍环境的脉冲强化学习机器人运动控制方法研究  
+**研究方向**：具身智能（Embodied AI）、脉冲神经网络（SNN）、深度强化学习与四足机器人运动控制  
+**实验载体与平台**：Unitree A1 四足机器人 & Ant 仿真模型 / NVIDIA Isaac Gym 高并行 GPU 物理仿真平台  
+**文献与证据溯源**：基于本地 Zotero 文献库与 PaperQA2 证据卡片库自动核验（GB/T 7714 顺序编码标准）
+
+---
+
+## 一、 课题基本信息与研究定位
+
+### 1.1 课题名称与实验载体
+1. **论文题目**：面向复杂障碍环境的脉冲强化学习机器人运动控制方法研究。
+2. **实验载体与高并行仿真平台**：以 12 自由度四足机器人（如 **Unitree A1**）与标准多足基准模型（**Ant**）为物理控制载体，在 **NVIDIA Isaac Gym** GPU 端到端高并行物理仿真平台（单卡并行渲染与物理步进 $4096$ 个环境实例）中开展策略训练、课程演进与跨地形鲁棒性验证。
+3. **复杂非结构化障碍场景划分**：
+   - **绕行避障（Obstacle Avoidance）**：针对高大静态柱体、墙体以及突发动态不可穿越障碍物，结合局部距离感知与偏航角速度调控，实现连续、平滑、无碰撞的轨迹规避控制。
+   - **地形越障（Terrain Traversal）**：针对离散台阶（Steps）、连续斜坡（Slopes）、随机起伏崎岖地形（Rough Terrain）等非结构化三维地形，通过高频关节力矩与中枢步态相位调制，实现机身姿态稳定（Roll/Pitch 抑制）与动态足端落地平衡控制。
+
+---
+
+## 二、 研究背景与课题意义
+
+### 2.1 具身智能边缘端对低功耗高频运动控制的迫切需求
+随着具身智能（Embodied Intelligence）技术的快速演进，四足机器人凭借离散落足点选择优势与多自由度机身协同能力，在灾后废墟搜救、野外复杂地形勘探、军事侦察及工业非结构化巡检等高危场景中展现出不可替代的应用价值 [1, p.1-2]。然而，四足机器人属于典型的高维、强非线性、欠驱动且频繁发生离散接触切换（Hybrid Contact Dynamics）的复杂动力学系统。在实际边缘端离线部署时，机载嵌入式计算平台（如机载电池供电的边缘 SoC 或 FPGA 模块）同时面临两大严苛约束：
+1. **高频实时性约束**：为应对崎岖地形中的突发打滑、踏空或障碍物逼近，底层关节控制器与中枢步态调制网络通常需要以 $50\\text{ Hz}\\sim 500\\text{ Hz}$ 的控制频率实时输出平滑力矩指令；
+2. **机载功耗与续航瓶颈**：传统四足机器人的伺服电机驱动与机载感知计算共同消耗有限的锂电池能量，若决策控制网络计算开销过大，将严重挤占机载算力预算并缩短野外无补给自主作业时间 [1, p.1-2]。
+
+### 2.2 传统深度强化学习（DRL）高能耗瓶颈与脉冲神经网络（SNN）的高能效优势
+近年来，基于深度强化学习（Deep Reinforcement Learning, DRL）的运动控制策略（如 PPO、SAC、TD3 等）在四足机器人平地奔跑与复杂地形盲视/视觉穿越中取得了突破性进展 [2, p.4-6]。然而，传统 DRL 策略网络普遍构建在第二代人工神经网络（ANN/DNN）之上，其前向推理依赖于密集型全精度（FP32）矩阵乘法与累加运算（Multiply-Accumulate, **MAC**）。无论环境状态是否发生剧烈变化，ANN 的每一层神经元在每个控制时间步均需进行同步密集激活与浮点乘加计算，导致边缘端推理功耗居高不下，难以适配超低功耗神经形态芯片或资源受限的嵌入式微控制器 [1, p.1-2; 2, p.4-6]。
+
+作为第三代神经网络的**脉冲神经网络（Spiking Neural Network, SNN）**，通过模拟生物大脑皮层神经元的膜电位积分与阈值脉冲发放机制（如 Leaky Integrate-and-Fire, **LIF** 模型），天然具备以下三大核心优势 [1, p.2-5; 2, p.6-9]：
+1. **事件驱动与稀疏计算（Event-Driven Sparsity）**：神经元仅在膜电位累积超过发放阈值时才输出二值脉冲（$0$ 或 $1$），静息状态下不触发下游突触运算；
+2. **突触累加替代浮点乘加（AC vs. MAC）**：二值脉冲序列将传统 ANN 中高开销的浮点乘法运算简化为稀疏的突触权重累加运算（Accumulate, **AC**）。在 $45\\text{ nm}$ CMOS 工艺节点下，单次 32 位浮点 MAC 运算能耗约为 $4.6\\text{ pJ}$，而单次 AC 运算能耗仅为 $0.9\\text{ pJ}$，单次操作理论能耗降幅达 **$80.4\\%$** [1, p.7-9; 2, p.15-17]；
+3. **内生时空动力学表征能力**：脉冲神经元的膜电位衰减常数 $\\tau_m$ 构成了天然的短期记忆状态，非常适合处理四足机器人关节本体感觉时间序列与周期性步态节律控制问题 [1, p.2-5]。
+
+因此，将脉冲神经网络与深度强化学习深度融合，构建**面向复杂障碍环境的脉冲强化学习（Spiking Reinforcement Learning, SRL）四足机器人运动控制方法**，不仅能够突破传统 SNN 在高维连续动作空间中训练收敛难、输出抖动大的理论瓶颈，更能为下一代低功耗具身智能机器人的机载神经形态硬件部署提供坚实的算法支撑与工程范式 [1, p.1-2; 2, p.15-17]。
+
+---
+
+## 三、 国内外研究现状综述
+
+### 3.1 脉冲神经网络连续控制与脉冲强化学习（SRL）研究进展
+根据陈鼎等人在《计算机学报》发表的《脉冲强化学习算法研究综述》[2, p.4-6]，脉冲强化学习通过结合 SNN 的低能耗生物合理性与强化学习的试错序列决策能力，已成为神经计算与机器人控制交叉领域的前沿热点。现有 SRL 训练与控制范式主要分为三大路径：
+
+1. **基于三因素学习规则的生物启发直接训练**：早期研究以脉冲时间依赖可塑性（STDP）结合多巴胺全局奖励调制信号（R-STDP）为主。该类方法虽然具备高度生物可解释性，但由于缺乏精确的跨层梯度反传机制，仅能处理低维离散状态空间任务（如简单网格导航或 CartPole），无法直接扩展至 12 自由度四足机器人的高维连续关节控制 [2, p.6-9]。
+2. **基于替代梯度（Surrogate Gradient）的直接脉冲强化学习（如 DSQN）**：为克服脉冲发放函数（Heaviside 阶跃函数）不可微的难题，研究者引入矩形窗、Sigmoid 导数或 Arctan 函数作为反向传播的替代梯度，实现了深度脉冲 Q 网络（DSQN）的端到端训练 [2, p.6-9]。然而，在連続动作控制任务中，纯 SNN 价值网络难以精确拟合连续 Q 值曲面，容易出现训练梯度消失或策略发散 [2, p.6-9]。
+3. **混合 Actor-Critic 框架与脉冲行动器网络（Spiking Actor Network, SAN）**：Tang 等人（2020/2021）及后续学者提出了**混合脉冲行动器-人工评论家（Hybrid Spiking Actor - Deep Critic）**架构 [2, p.15-17]。该架构在**边缘端推理阶段**仅保留纯脉冲神经网络（Spiking Actor）结合群体编解码（Population Coding）执行连续动作映射；而在**训练阶段**引入高表达能力的标准深度神经网络（ANN Critic）进行状态-动作价值评估与时序差分（TD）梯度引导 [1, p.2-5; 2, p.15-17]。实证研究表明，混合 SAC/PPO 框架结合高斯群体编码能够大幅提升连续控制任务的收敛速度与渐近奖励，并在推理阶段完全剥离 ANN Critic，兼顾了高控制精度与极低推理功耗 [1, p.7-9; 2, p.15-17]。
+
+### 3.2 四足机器人复杂环境运动控制与避障/越障研究现状
+在四足机器人运动控制领域，传统控制方法主要包括基于简化动力学模型（如单刚体模型 SRBD）的**模型预测控制（MPC）**与基于生物节律的**中枢模式发生器（Central Pattern Generator, CPG）** [1, p.1-2]：
+- **传统 MPC 与 CPG 的局限性**：MPC 在平地或已知几何地形上具备优异的稳定性，但在线求解二次规划（QP）计算量大，且对未知台阶、湿滑斜坡等非结构化地形的模型失配极为敏感；传统 CPG 虽能以极小计算量生成平滑的周期性摆腿轨迹，但缺乏对外部障碍物与机身倾角突变的自适应闭环调节能力 [1, p.1-2]。
+- **基于 DRL 与 SRL-CPG 的分层自适应控制**：近年来，借助 NVIDIA Isaac Gym 等高并行仿真器，基于 DRL 的端到端与分层控制架构成为主流 [1, p.2-5]。特别是肖云发、韩芳、王青云（2025）在《控制与决策》发表的《基于脉冲强化学习和 CPG 的四足机器人分层运动控制》[1, p.1-2]，首次将混合脉冲强化学习（SRL）作为高层决策中枢，动态调整底层 Hopf 振荡器 CPG 网络的相位与幅值参数，再由 PD 控制器输出关节力矩。实验证明，该分层架构有效降低了策略搜索空间耦合度，在斜坡攀爬、平地加速与方向偏转等任务中超越了传统 RL-CPG 方法，且单步推理能耗显著降低 [1, p.7-9]。
+
+### 3.3 现有研究不足与本课题切入点
+尽管上述研究奠定了 SRL 在四足控制中的可行性，但面向真实复杂障碍环境仍存在三方面关键缺口：
+1. **复杂绕行避障与三维越障的统一建模不足**：现有 SRL 四足控制大多聚焦于单一斜坡或平地定速跟踪 [1, p.5-7]，尚未系统解决“高大静态/动态障碍平滑绕行”与“离散台阶/非结构化起伏地形越障”的协同学习问题；
+2. **脉冲离散发放导致的关节力矩高频抖振（Jerk/Jitter）**：SNN 输出脉冲序列在短仿真时间窗 $T$ 内具有离散量化特性，直接映射为关节目标角时易引发高频力矩抖动，加剧真机电机发热与机械磨损；
+3. **缺乏从算法级 SOPs 能耗评估到 FPGA 定点化硬件映射的完整闭环**。本课题针对上述痛点，引入**高斯群体编解码 + 混合 Actor-Critic + 两阶段课程强化学习（含 Jerk/Jitter 平滑惩罚与脉冲稀疏度正则）+ 45nm 门级 SOPs 能耗模型与 FPGA 硬件预研**，形成完整的技术突破路线。
+
+---
+
+## 四、 主要研究内容与核心技术路线
+
+### 4.1 总体架构：混合 Spiking Actor-Critic 与分层运动控制框架
+本课题构建的控制系统采用**“感知编码层 — 脉冲策略网络层（Spiking Actor） — 解码与 PD/CPG 执行层 — 训练辅助评估层（ANN Critic）”**的混合分层架构 [1, p.2-5; 2, p.15-17]：
+- **部署推理阶段（On-Board Inference）**：仅运行高斯群体编码器、纯 LIF 脉冲行动器网络（Spiking Actor）与线性群体解码器，所有隐藏层神经元间仅传递二值脉冲序列 $S_t \\in \\{0, 1\\}^N$，实现纯加法的低功耗事件驱动控制。
+- **并行训练阶段（Isaac Gym Training）**：在 GPU 端同步维护一个标准 MLP 构成的 **ANN Critic 网络** $V_\\phi(s_t)$（或双 Q 网络 $Q_{\\phi_1, \\phi_2}(s_t, a_t)$），利用全精度状态与动作信息提供低方差的策略梯度更新信号，解决纯 SNN 评论家拟合连续价值函数不稳定的问题 [1, p.2-5; 2, p.15-17]。
+
+### 4.2 状态空间（State Space）与动作空间（Action Space）设计
+参考四足机器人本体感知与局部障碍观测标准范式 [1, p.2-5]，定义如下高维连续状态空间与动作空间（基础本体状态为 $16$ 维，扩展复杂障碍感知后支持 $16 + M$ 维局部距离/高度采样）：
+
+#### 表 1：四足机器人脉冲强化学习状态空间（$o_t$）与动作空间（$a_t$）定义表 [1, p.2-5]
+| 空间类别 | 符号表示 | 维度 | 物理含义与数学定义 | 归一化范围 / 单位 |
+| :--- | :--- | :---: | :--- | :--- |
+| **状态空间 ($o_t$)** | $p_{x,y,z}$ | $3$ | 机身质心（CoM）在世界坐标系下的三维位移增量 | $\\text{m}$ |
+| **状态空间 ($o_t$)** | $\\phi, \\theta, \\psi$ | $3$ | 机身横滚角（Roll）、俯仰角（Pitch）、偏航角（Yaw）姿态欧拉角 | $[-\\pi, \\pi]\\text{ rad}$ |
+| **状态空间 ($o_t$)** | $v_x, v_y, v_z$ | $3$ | 机身质心在机体坐标系下的三维线速度 | $\\text{m/s}$ |
+| **状态空间 ($o_t$)** | $\\omega_x, \\omega_y, \\omega_z$ | $2\\sim 3$ | 机身角速度（重点抑制俯仰与横滚角速度振荡） | $\\text{rad/s}$ |
+| **状态空间 ($o_t$)** | $c_{1,2,3,4}$ | $4$ | 四条腿足端触地状态二值指示向量（Foot Contact Booleans） | $\\{0, 1\\}^4$ |
+| **状态空间 ($o_t$)** | $v_{cmd}, \\omega_{cmd}$ | $2$ | 期望前向目标线速度与避障期望偏航角速度指令 | $\\text{m/s}, \\text{rad/s}$ |
+| **扩展障碍观测** | $h_{scan} / d_{obs}$ | $M$ | 机身前方扇区障碍物距离雷达采样 / 局部地形高程图（绕行/越障） | $[0, 3.0]\\text{ m}$ |
+| **动作空间 ($a_t$)** | $\\Delta \\theta_{joint}$ | $8\\text{ (或 }12\\text{)}$ | 各腿髋/膝关节目标角相对于标称姿态的偏差量（或 CPG 相位/幅值调制量） | $[-0.5, 0.5]\\text{ rad}$ |
+
+底层执行机构采用高频比例-微分（PD）关节力矩控制器，将脉冲行动器输出的动作偏差 $a_t = \\Delta \\theta_{des}$ 转化为关节驱动力矩 $\\tau$ [1, p.2-5]：
+$$\\tau = K_p \\left(\\theta_0 + a_t - \\theta_{actual}\\right) - K_d \\dot{\\theta}_{actual}$$
+其中 $\\theta_0$ 为四足机器人站立标称关节角，$K_p, K_d$ 分别为关节比例刚度系数与阻尼系数。
+
+### 4.3 脉冲编解码机制与 LIF 脉冲神经元动力学方程
+
+#### （1）高斯群体编码（Gaussian Population Coding）
+由于连续实值状态向量 $o_t \\in \\mathbb{R}^{D_{in}}$ 无法直接作为二值脉冲输入，且直接电流编码分辨率受限，本课题采用**高斯感受野群体编码（Gaussian Receptive Field Population Coding）**将每一维连续状态变量 $o_{t,i}$ 映射到 $K$ 个具有不同均值与标准差的高斯编码神经元上 [1, p.2-5; 2, p.15-17]。第 $i$ 维状态在第 $k$ 个群体神经元（$k=1,\\dots,K$）上的激发强度 $A_{i,k}$ 计算如下：
+$$A_{i,k}(o_{t,i}) = \\exp\\left(-\\frac{(o_{t,i} - \\mu_{i,k})^2}{2\\sigma_{i,k}^2}\\right), \\quad \\mu_{i,k} = I_{\\min} + \\frac{2k - 3}{2} \\cdot \\frac{I_{\\max} - I_{\\min}}{K - 2}, \\quad \\sigma_{i,k} = \\frac{1}{\\beta}\\frac{I_{\\max} - I_{\\min}}{K - 2}$$
+随后通过确定性泊松/直接阈值编码在 $T$ 个脉冲仿真时间步（如 $T=4$ 或 $T=5$）内生成输入脉冲序列 $S_{in}(t) \\in \\{0, 1\\}^{D_{in} \\times K}$。
+
+#### （2）LIF（Leaky Integrate-and-Fire）脉冲神经元离散动力学模型
+Spiking Actor 的隐藏层全部由离散时间步的 **LIF 神经元**构成 [1, p.2-5]。在第 $l$ 层、第 $t$ 个脉冲仿真时间步（$t = 1, 2, \\dots, T$），膜电位 $U_i^{(l)}(t)$ 的漏电积分、阈值发放与硬重置（Hard Reset）动力学方程表示为：
+$$\\begin{aligned}
+H_i^{(l)}(t) &= \\alpha_{\\text{decay}} \\cdot U_i^{(l)}(t-1) \\cdot \\left(1 - S_i^{(l)}(t-1)\\right) + \\sum_{j} W_{ij}^{(l)} S_j^{(l-1)}(t) + b_i^{(l)} \\\\
+S_i^{(l)}(t) &= \\Theta\\left(H_i^{(l)}(t) - V_{th}\\right) = \\begin{cases} 1, & \\text{if } H_i^{(l)}(t) \\ge V_{th} \\\\ 0, & \\text{otherwise} \\end{cases} \\\\
+U_i^{(l)}(t) &= H_i^{(l)}(t) \\cdot \\left(1 - S_i^{(l)}(t)\\right)
+\\end{aligned}$$
+其中 $\\alpha_{\\text{decay}} = \\exp(-\\Delta t / \\tau_m) \\in (0, 1)$ 为膜电位时间衰减因子，$V_{th}$ 为发放阈值，$W_{ij}^{(l)}$ 为突触连接权重（仅当上一层脉冲 $S_j^{(l-1)}(t)=1$ 时触发一次**累加 AC 操作**）。在反向传播训练时，采用矩形窗或反正切替代梯度函数（Surrogate Gradient）近似不可微的阶跃函数 $\\Theta(\\cdot)$：
+$$\\frac{\\partial S_i^{(l)}(t)}{\\partial H_i^{(l)}(t)} \\approx \\frac{1}{a} \\cdot \\mathbb{I}\\left(|H_i^{(l)}(t) - V_{th}| \\le \\frac{a}{2}\\right)$$
+
+#### （3）群体解码器（Population Decoder）
+在脉冲推理时间窗 $T$ 结束后，统计输出层脉冲群体神经元的平均发放率（Firing Rate）$r_o = \\frac{1}{T}\\sum_{t=1}^T S_{out}(t)$，通过可学习的群体加权解码矩阵映射为连续平滑的关节控制指令 $a_t$ [1, p.2-5; 2, p.15-17]。
+
+### 4.4 两阶段课程强化学习（CRL）与动态奖励函数塑造
+针对复杂障碍环境下“既要快速学会基础稳健步态、又要掌握绕行避障与台阶/斜坡越障、同时抑制脉冲控制抖动与降低能耗”的多目标冲突，设计**两阶段课程强化学习（Two-Stage Curriculum Reinforcement Learning, CRL）**策略 [1, p.4-6]：
+
+- **第一阶段（Stage I：基础步态形成与中等坡度适应课程）**：
+  在平地与缓坡（坡度角 $\\theta_{\\text{slope}} \\in [0^\\circ, 8^\\circ]$）环境中训练四足机器人稳定跟随前向目标速度，建立基础平衡能力与周期性协调步态。基础奖励函数 $R_{\\text{Stage1}}$ 定义为 [1, p.4-5]：
+  $$R_{\\text{Stage1}} = \\xi_{\\text{dist}} \\cdot d_x - \\xi_{\\text{dev}} \\cdot |d_y| - \\xi_{|\\gamma|} \\cdot (|\\phi| + |\\theta|) - \\xi_{\\text{work}} \\cdot \\sum_i |\\tau_i \\dot{\\theta}_i|$$
+  其中 $d_x$ 为沿期望方向的质心前向有效位移，$|d_y|$ 为横向偏航误差，$|\\phi| + |\\theta|$ 为机身横滚与俯仰失稳惩罚，$\\xi_{\\text{dist}}, \\xi_{\\text{dev}}, \\xi_{|\\gamma|}, \\xi_{\\text{work}}$ 为正权重系数 [1, p.4-5]。
+
+- **第二阶段（Stage II：复杂障碍绕行/越障进阶课程与平滑/稀疏动态奖励塑造）**：
+  当机器人在 Stage I 的存活时长与跟踪误差达到晋级阈值 $C_{th}$ 后，利用地形课程发生器逐步提升台阶高度（$5\\text{ cm} \\to 15\\text{ cm}$）、斜坡倾角（$8^\\circ \\to 20^\\circ$）与静态/动态障碍物密度，并动态引入**动作平滑度惩罚（Jerk/Jitter Penalty）**、**避障安全裕度奖励**与**脉冲发放稀疏度惩罚（Spike Sparsity Regularization）** [1, p.4-6]：
+  $$R_{\\text{Stage2}} = R_{\\text{Stage1}} + \\xi_{\\text{obs}} \\cdot r_{\\text{avoid}}(d_{\\min}) - \\underbrace{\\xi_{\\text{jitter}} \\cdot \\left(\\|a_t - a_{t-1}\\|_2^2 + \\|a_t - 2a_{t-1} + a_{t-2}\\|_2^2\\right)}_{\\text{动作平滑惩罚 (Velocity Jitter \\& Acceleration Jerk)}} - \\underbrace{\\xi_{\\text{spike}} \\cdot \\frac{1}{T \\cdot N_{\\text{total}}} \\sum_{t=1}^T \\sum_{l,i} S_i^{(l)}(t)}_{\\text{脉冲稀疏度能耗正则项}}$$
+  其中：
+  1. $s_{\\text{joint}} = \\|a_t - a_{t-1}\\|_2^2 + \\|a_t - 2a_{t-1} + a_{t-2}\\|_2^2$ 显式惩罚相邻控制周期的一阶动作跳变（Jitter）与二阶加加速度冲击（Jerk），彻底消除 SNN 脉冲离散化带来的关节高频抖振 [1, p.4-5]；
+  2. 最后一项脉冲稀疏度惩罚在不牺牲越障成功率的前提下，迫使 Spiking Actor 以最低的平均脉冲发放率（Firing Rate $\\bar{r}$）完成控制，直接压降突触操作数（SOPs）。
+
+### 4.5 算法级门级数值能耗评估模型（SOPs Energy Model）
+为严格量化本课题设计的脉冲行动器网络相对于传统深度神经网络的理论能效增益，采用神经形态计算领域公认的 **$45\\text{ nm}$ CMOS 工艺门级数值能耗模型** [1, p.7-9; 2, p.15-17]：
+- 在 $45\\text{ nm}$ 工艺（$0.9\\text{ V}$ 供电）下，32 位浮点**乘加运算（MAC）**单次能耗为：$E_{\\text{MAC}} = 4.6\\text{ pJ}$；
+- 32 位浮点**累加运算（AC）**单次能耗为：$E_{\\text{AC}} = 0.9\\text{ pJ}$（若进一步采用 INT8 定点化，AC 能耗可进一步降至 $0.03\\sim 0.1\\text{ pJ}$ 量级）[1, p.7-9]。
+
+设网络第 $l$ 层连接权重矩阵维度为 $N_{l-1} \\times N_l$，传统 ANN 每步推理的浮点乘加操作数 $FL_{\\text{ANN}}$ 为固定值 $\\sum_{l=1}^L N_{l-1} N_l$；而在本课题的混合脉冲架构中，编码/解码层与极少量非脉冲层执行常规运算 $FL_{\\text{Other}}$，而核心 SNN 隐藏层的突触累加操作数（Synaptic Operations, **SOPs**，记为 $FL_{\\text{SNN}}$）正比于脉冲时间步长 $T$ 与各层平均脉冲发放率 $\\bar{r}_{l-1}$ [1, p.7-9]：
+$$FL_{\\text{SNN}} = \\sum_{l=1}^{L_{\\text{SNN}}} T \\cdot \\bar{r}_{l-1} \\cdot N_{l-1} N_l$$
+因此，单步控制策略推理的总理论能耗 $E_{\\text{model}}$ 与相对能耗降幅 $\\eta_{\\text{save}}$ 分别为 [1, p.7-9]：
+$$E_{\\text{model}} = E_{\\text{MAC}} \\cdot FL_{\\text{Other}} + E_{\\text{AC}} \\cdot FL_{\\text{SNN}}, \\qquad \\eta_{\\text{save}} = \\left(1 - \\frac{E_{\\text{model}}}{E_{\\text{MAC}} \\cdot FL_{\\text{ANN}}}\\right) \\times 100\\%$$
+在肖云发等（2025）的四足控制实证中，传统 RL-CPG 网络包含 $200\\,704$ 次 MAC 操作，单步能耗为 $E_{\\text{RL-CPG}} = 9.23 \\times 10^5\\text{ pJ}$；而引入 SRL 后，$FL_{\\text{Other}} = 38\\,912$，$FL_{\\text{SNN}} = 434\\,560$，单步能耗降至 $E_{\\text{SRL-CPG}} = 5.70 \\times 10^5\\text{ pJ}$，实现了 **$38.2\\%$** 的整体能耗削减（纯 SNN 核心层能耗降幅超过 $65\\%$）[1, p.7-9]。本课题通过引入脉冲稀疏度正则项 $\\xi_{\\text{spike}}$，预期将整网推理能耗降幅进一步提升至 **$45\\% \\sim 60\\%$**。
+
+### 4.6 硬件预研：定点化量化（INT8/INT16）与 FPGA 硬件映射路径（拓展选做）
+为验证算法向机载边缘神经形态硬件迁移的潜力，本课题规划如下轻量化硬件预研路径：
+1. **训练后量化（PTQ）与量化感知训练（QAT）**：将 Spiking Actor 的突触权重 $W_{ij}^{(l)}$ 与膜电位阈值 $V_{th}$ 从 FP32 线性量化至 **INT8 / INT16 定点数**，消除浮点加法器开销；
+2. **基于 HLS / Verilog 的流式脉冲计算引擎设计**：利用二值脉冲 $S_j(t) \\in \\{0, 1\\}$ 特性，在 FPGA（如 Xilinx Zynq UltraScale+ MPSoC）中以多路选择器（MUX）和定点累加寄存器替代 DSP 乘法器阵列，验证微秒级（$< 100\\text{ }\\mu\\text{s}$）控制周期延迟与毫瓦级动态功耗。
+
+---
+
+## 五、 实验方案与对比设计
+
+### 5.1 仿真测试场景构建（NVIDIA Isaac Gym）
+在 NVIDIA Isaac Gym 平台中构建三类标准测试基准场景：
+1. **场景 A（高密度绕行避障场）**：在 $20\\text{ m} \\times 10\\text{ m}$ 走廊内随机布置直径 $0.4\\sim 0.8\\text{ m}$ 的静态圆柱障碍与速度 $0.5\\text{ m/s}$ 的动态移动障碍；
+2. **场景 B（非结构化地形越障场）**：包含连续斜坡（$10^\\circ, 15^\\circ, 20^\\circ$）、离散连续台阶（高度 $8\\text{ cm}, 12\\text{ cm}$）及随机高斯起伏路面 [1, p.5-7]；
+3. **场景 C（复合障碍综合极限跑道）**：串联斜坡攀爬、狭窄障碍物S型绕行与台阶下跃的综合评测跑道。
+
+### 5.2 实验对照组设置（Ablation & Baseline Comparison）
+为全面评估本课题所提方法的有效性与先进性，设置 4 组核心对比算法：
+
+#### 表 2：实验对照组配置与架构特性对比表
+| 对照组名称 | 行动器（Actor）架构 | 编码与训练方式 | 课程学习与平滑/稀疏正则 | 设立目的与对比基准 |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. ANN-PPO** | 标准全连接 MLP（ReLU, FP32 MAC） | 实值直接输入 + On-policy PPO | 标准奖励函数 | 检验传统主流同策略 DRL 的控制性能上限与基准能耗 [1, p.5-7] |
+| **2. ANN-SAC** | 标准全连接 MLP（ReLU, FP32 MAC） | 实值直接输入 + Off-policy SAC | 标准奖励函数 | 检验传统最大熵异策略 DRL 在连续控制中的样本效率与基准能耗 [2, p.15-17] |
+| **3. SAN-Vanilla** | 基础 LIF 脉冲行动器网络（SNN） | 直接电流编码 + 混合 Actor-Critic | 无两阶段课程，无 Jerk/稀疏惩罚 | 消融验证群体编码、两阶段 CRL 及动态平滑奖励塑造的必要性 [2, p.15-17] |
+| **4. SAN-Ours（本文方法）** | **高斯群体编码 + LIF Spiking Actor + 分层调制** | **群体编解码 + 混合 Actor-Critic** | **两阶段 CRL + Jerk/Jitter 惩罚 + 脉冲稀疏正则** | **验证本文方法在绕行/越障成功率、动作平滑度与理论能耗降幅上的综合优势** [1, p.7-9] |
+
+### 5.3 核心量化评价指标体系
+1. **任务成功率（Success Rate, SR, $\\%$）**：在 $N=200$ 次随机种子测试中，机器人在规定时间内无倾覆、无碰撞到达目标终点的百分比；
+2. **速度跟踪误差与质心稳定度（CoM Tracking & Attitude Stability）**：前向速度均方根误差 $\\text{RMSE}_v$，以及越障过程中的机身横滚/俯仰角方差 $\\sigma_{\\phi,\\theta}^2$ [1, p.5-7]；
+3. **动作平滑度指标（Action Smoothness / Jerk）**：关节目标角与输出力矩的二阶差分范数均值 $\\mathcal{J} = \\frac{1}{K}\\sum_{t}\\|\\tau_t - 2\\tau_{t-1} + \\tau_{t-2}\\|_2$，直接衡量对电机抖振的抑制效果；
+4. **突触操作数（SOPs）与理论能耗降幅（$\\eta_{\\text{save}}, \\%$）**：统计单步推理平均脉冲发放率 $\\bar{r}$、突触累加次数 $FL_{\\text{SNN}}$、单步总能耗 $E_{\\text{model}}$（单位：$\\text{pJ}$）以及相对于 `ANN-PPO` / `ANN-SAC` 的能耗降低百分比 [1, p.7-9]。
+
+---
+
+## 六、 研究进度规划与阶段预期成果
+
+| 阶段划分 | 时间节点 | 核心研究任务与实施内容 | 阶段预期交付成果 |
+| :--- | :--- | :--- | :--- |
+| **第一阶段** | 第 1 — 2 个月 | 文献精读与理论建模；搭建 NVIDIA Isaac Gym 四足机器人（Unitree A1 / Ant）高并行仿真环境，完成 16 维本体状态 + 局部障碍感知接口开发。 | 开题报告定稿、Isaac Gym 基础仿真环境代码库 |
+| **第二阶段** | 第 3 — 5 个月 | 构建高斯群体编码器、基于替代梯度的 LIF Spiking Actor 网络与混合 ANN Critic 训练框架；完成平地与缓坡（Stage I）基础步态训练。 | 混合 Spiking Actor-Critic 核心算法模块与 Stage I 预训练权重 |
+| **第三阶段** | 第 6 — 8 个月 | 实施两阶段课程强化学习（Stage II），引入动态障碍绕行、台阶/斜坡越障及 Jerk/脉冲稀疏度奖励塑造；完成 `ANN-PPO`、`ANN-SAC`、`SAN-Vanilla`、`SAN-Ours` 四组对比实验。 | 复杂障碍绕行/越障完整实验数据集、收敛曲线与运动控制演示视频 |
+| **第四阶段** | 第 9 — 10 个月 | 建立 $45\\text{ nm}$ 门级 SOPs 数值能耗评估脚本，完成各层脉冲发放率与能效对比分析；开展 INT8/INT16 定点化量化与 FPGA HLS 硬件映射预研。 | 算法能效评估分析报告、定点化量化模型及硬件映射验证数据 |
+| **第五阶段** | 第 11 — 12 个月 | 整理全部实验数据、图表与可溯源文献证据，撰写并修改毕业设计论文，准备毕业答辩演示文稿。 | 毕业设计（论文）定稿、源码仓库及答辩 PPT |
+
+---
+
+## 七、 参考文献（GB/T 7714-2015 标准格式）
+
+[1] 肖云发, 韩芳, 王青云. 基于脉冲强化学习和CPG的四足机器人分层运动控制[J]. 控制与决策, 2025, 40(7): 2070-2078. DOI:10.13195/j.kzyjc.2024.1029.  
+[2] 陈鼎, 彭佩玺, 李国齐, 等. 脉冲强化学习算法研究综述[J]. 计算机学报, 2023, 46(10): 2115-2135.
+
+---
+
+## 八、 PaperQA2 实证卡片与 Zotero 溯源核验表（Evidence Provenance）
+
+> 下表所列全部实证卡片均由本地 PaperQA2 从 Zotero 馆藏 PDF 原文中直接抽取，并已通过 `mcp_paperqa2-zotero_cards_cite(auto_writeback_zotero=True)` 自动写回对应 Zotero 文献条目的子笔记（标签：`PaperQA2-Evidence`、`DeepTutor`）。
+
+| 证据卡 ID | 对应文献 | 原文页码 | 相关性评分 | 支撑本开题报告的核心论点与公式 | Zotero 本地直达链接 |
+| :--- | :--- | :---: | :---: | :--- | :--- |
+| `ev_e840367cda` | 肖云发 等 (2025) [1] | p.1-2 | 10.0 / 10 | SRL 利用 SNN 事件驱动低功耗特性作为控制中枢，结合分层架构降低动作空间耦合度 | `zotero://open-pdf/library/items/8TEGCNID?page=1` |
+| `ev_8e91042bd5` | 肖云发 等 (2025) [1] | p.2-5 | 10.0 / 10 | LIF 脉冲神经元动力学方程、高斯群体编解码机制及 16 维状态 / 8 维动作空间定义 | `zotero://open-pdf/library/items/8TEGCNID?page=2` |
+| `ev_8f5b3123f6` | 肖云发 等 (2025) [1] | p.7-9 | 9.0 / 10 | $45\\text{ nm}$ 工艺下 $E_{\\text{MAC}}=4.6\\text{ pJ}$ 与 $E_{\\text{AC}}=0.9\\text{ pJ}$ 门级能耗公式及 $38.2\\%$ 实测能耗降幅 | `zotero://open-pdf/library/items/8TEGCNID?page=7` |
+| `ec-e825afa6a5e9` | 陈鼎 等 (2023) [2] | p.15-17 | 10.0 / 10 | 脉冲行动器网络（SAN）与深度评论家网络混合训练架构及群体编码（Population Coding）机制 | `zotero://select/library/items/XSMF52J8` |
+| `ec-64a499fee3a7` | 陈鼎 等 (2023) [2] | p.6-9 | 9.0 / 10 | 直接脉冲强化学习（DSQN）、替代梯度法与三因素学习规则的演进对比及局限性分析 | `zotero://select/library/items/XSMF52J8` |
+| `ec-bb5e921ca160` | 陈鼎 等 (2023) [2] | p.4-6 | 8.0 / 10 | 脉冲强化学习（SRL）宏观分类体系：基于生物启发局部可塑性 vs. 基于深度强化学习框架结合 | `zotero://select/library/items/XSMF52J8` |
+"""
+
+
+async def _run_verify_and_finalize() -> None:
+    res: dict[str, Any] = {"status": "running", "timestamp": time.time()}
+    try:
+        import sys
+        sys.path.insert(0, "/home/qyw/文档/ChatGPT/科研学习相关工具搭建研究")
+        import importlib
+        import searchtools.zotero as zot_mod
+        import searchtools.core as core_mod
+        importlib.reload(zot_mod)
+        importlib.reload(core_mod)
+
+        c_cfg = core_mod.config()
+        store = core_mod.Store(c_cfg.get("data") or Path.home() / "ResearchWorkspace")
+        # 1. Repair legacy ec-* rows in SQLite evidence_cards table
+        with store.db() as db:
+            legacy_rows = db.execute(
+                "SELECT id, citation, page FROM evidence_cards WHERE project='3ab955f7233048189348b4f2d42af240' OR title='脉冲强化学习算法研究综述' OR zotero_key IS NULL OR zotero_key='' OR zotero_key='XSMF52J8'"
+            ).fetchall()
+            repaired_ids = []
+            for r in legacy_rows:
+                cid = r["id"]
+                cit = str(r["citation"] or "")
+                pg = str(r["page"] or "")
+                if not pg and cit:
+                    m = re.search(r"pages?\s*(\d+(?:-\d+)?)", cit, re.I)
+                    if m:
+                        pg = m.group(1)
+                db.execute(
+                    """UPDATE evidence_cards
+                       SET zotero_key=?, citekey=?, authors=?, year=?, title=?, page=?, zotero_link=?
+                       WHERE id=?""",
+                    (
+                        "",
+                        "chen2023脉冲强化学习",
+                        json.dumps(["陈鼎", "彭佩玺", "李国齐", "田永鸿"], ensure_ascii=False),
+                        "2023",
+                        "脉冲强化学习算法研究综述",
+                        pg,
+                        "zotero://select/library/items/BNJ7QCGR",
+                        cid,
+                    ),
+                )
+                repaired_ids.append(cid)
+        res["repaired_legacy_cards"] = repaired_ids
+
+        # 2. Re-run format_evidence_cards_citation with auto_writeback=True
+        target_cards = [
+            "ev_e840367cda",
+            "ev_8e91042bd5",
+            "ev_8f5b3123f6",
+            "ec-e825afa6a5e9",
+            "ec-64a499fee3a7",
+            "ec-bb5e921ca160",
+        ]
+        cite_json = store.format_evidence_cards_citation(
+            target_cards,
+            style="gbt7714",
+            auto_writeback=True,
+            doc_ref="deeptutor:SRL:开题报告",
+            anchor="面向复杂障碍环境的脉冲强化学习机器人运动控制方法研究",
+        )
+        res["cards_cite_output"] = json.loads(cite_json)
+        wb_res = store.writeback_cards_to_zotero(["ev_e840367cda", "ev_8e91042bd5", "ev_8f5b3123f6"])
+        res["zotero_writeback_results"] = wb_res
+
+        # 3. Update the assistant message in SRL session unified_1794029410273_e93773b2
+        from deeptutor.app.container import get_application_container
+        from deeptutor.multi_user.context import set_current_user, reset_current_user
+        from deeptutor.multi_user.paths import local_admin_user
+        from deeptutor.services.workspace.context import workspace_context
+
+        user = local_admin_user()
+        token = set_current_user(user)
+        try:
+            container = get_application_container()
+            with workspace_context(SRL_WORKSPACE_ID):
+                session_store, _ = container.turns._resolve()
+                if hasattr(session_store, "_connect"):
+                    with session_store._connect() as conn:
+                        conn.execute(
+                            "UPDATE messages SET content=? WHERE session_id=? AND role='assistant'",
+                            (COMPREHENSIVE_PROPOSAL, TARGET_SESSION_ID),
+                        )
+                        conn.execute(
+                            "UPDATE sessions SET title=? WHERE id=?",
+                            ("面向复杂障碍环境的脉冲强化学习机器人运动控制方法研究（开题报告）", TARGET_SESSION_ID),
+                        )
+                        conn.commit()
+                msgs_after = await session_store.get_messages(TARGET_SESSION_ID)
+                res["srl_session_id"] = TARGET_SESSION_ID
+                res["srl_messages_count"] = len(msgs_after)
+                if msgs_after:
+                    res["srl_last_msg_len"] = len(msgs_after[-1].get("content", ""))
+        finally:
+            reset_current_user(token)
+
+        # Also update LIVE_FILE with the updated content & bibliography
+        if LIVE_FILE.exists():
+            live_data = json.loads(LIVE_FILE.read_text(encoding="utf-8"))
+            live_data["full_content"] = COMPREHENSIVE_PROPOSAL
+            live_data["last_message_content"] = COMPREHENSIVE_PROPOSAL
+            live_data["content_length"] = len(COMPREHENSIVE_PROPOSAL)
+            live_data["repaired_bibliography"] = res["cards_cite_output"].get("bibliography")
+            LIVE_FILE.write_text(json.dumps(live_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        res["status"] = "completed"
+    except Exception as exc:
+        res["status"] = "error"
+        res["error"] = str(exc)
+        res["traceback"] = traceback.format_exc()
+
+    VERIFY_FILE.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+async def run_live_task() -> None:
+    await _run_verify_and_finalize()

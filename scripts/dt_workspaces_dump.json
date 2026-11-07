@@ -1,0 +1,131 @@
+{
+  "ok": true,
+  "srl_workspace": {
+    "workspace_id": "ws_f58357f93d8e428a930a2b8c42dce21b",
+    "display_name": "SRL",
+    "path": "/home/qyw/DeepTutor/data/user/workspaces/ws_f58357f93d8e428a930a2b8c42dce21b",
+    "kind": "workspace",
+    "follows_root": true,
+    "archived": false,
+    "created_at": "2026-11-01T12:27:54.506730+00:00",
+    "status": "ready",
+    "error": "",
+    "instructions": "",
+    "resources": {
+      "skills": null,
+      "mcp": null,
+      "knowledge_bases": null
+    }
+  },
+  "srl_root": "/home/qyw/DeepTutor/data/user/workspaces/ws_f58357f93d8e428a930a2b8c42dce21b",
+  "all_workspaces": [
+    {
+      "workspace_id": "ws_6188c4243de052029b1770c918bfa370",
+      "display_name": "System workspace",
+      "path": "/home/qyw/DeepTutor/data/user/workspaces/ws_6188c4243de052029b1770c918bfa370",
+      "kind": "system",
+      "follows_root": true,
+      "archived": false,
+      "created_at": "2026-10-22T02:31:55.518461+00:00",
+      "status": "ready",
+      "error": "",
+      "instructions": "",
+      "resources": {
+        "skills": null,
+        "mcp": null,
+        "knowledge_bases": null
+      }
+    },
+    {
+      "workspace_id": "ws_270fa4f1ffff5cfd938eb090972a208c",
+      "display_name": "General workspace",
+      "path": "/home/qyw/DeepTutor/data/user/workspaces/ws_270fa4f1ffff5cfd938eb090972a208c",
+      "kind": "general",
+      "follows_root": true,
+      "archived": false,
+      "created_at": "2026-10-22T02:31:55.521280+00:00",
+      "status": "ready",
+      "error": "",
+      "instructions": "",
+      "resources": {
+        "skills": null,
+        "mcp": null,
+        "knowledge_bases": null
+      }
+    },
+    {
+      "workspace_id": "ws_f58357f93d8e428a930a2b8c42dce21b",
+      "display_name": "SRL",
+      "path": "/home/qyw/DeepTutor/data/user/workspaces/ws_f58357f93d8e428a930a2b8c42dce21b",
+      "kind": "workspace",
+      "follows_root": true,
+      "archived": false,
+      "created_at": "2026-11-01T12:27:54.506730+00:00",
+      "status": "ready",
+      "error": "",
+      "instructions": "",
+      "resources": {
+        "skills": null,
+        "mcp": null,
+        "knowledge_bases": null
+      }
+    }
+  ],
+  "skills_in_srl": [
+    {
+      "name": "evidence-based-writing",
+      "description": "学术实证写作与文献证据链闭环工作流。在需要基于论文/文献证据回答学术问题、撰写开题报告、文献综述、方法论证、实验设计对比、或需要可溯源引用（默认 GB/T 7714 格式）时激活。完成：加载 MCP 工具 -> 检索复用已有证据卡 -> Zotero 本地检索与限定范围 (Scope) -> 文献充足度评估 -> 外部检索与候选入库（人工确认，单次上限 20 篇） -> PaperQA2 证据抽取 -> GB/T 7714 引用生成与 Zotero 子笔记自动写回。",
+      "tags": [],
+      "source": "user",
+      "read_only": false
+    },
+    {
+      "name": "docx",
+      "description": "Read, create, or edit Microsoft Word .docx files — extract/summarize text and tables, generate reports/letters/memos with headings, tables, images, TOC and page numbers, do find-and-replace, or apply tracked changes (redlines) and comments. Use whenever the user has a .docx or wants a Word deliverable. Not for PDF, .xlsx, .pptx, or Google Docs.",
+      "tags": [
+        "tool",
+        "office"
+      ],
+      "source": "builtin",
+      "read_only": true
+    },
+    {
+      "name": "pdf",
+      "description": "Read, extract (text/tables), create, merge/split/rotate, watermark, encrypt, fill, and render-to-image .pdf files. Use whenever the user uploads a .pdf or asks to produce, edit, or pull data out of one.",
+      "tags": [
+        "tool",
+        "office"
+      ],
+      "source": "builtin",
+      "read_only": true
+    },
+    {
+      "name": "pptx",
+      "description": "Read, create, or edit PowerPoint .pptx decks — build slides from an outline, extract slide text/speaker notes, edit shapes/tables/charts, replace images, or export to PDF/images. Use whenever a .pptx (or .ppt) file is an input or output, or the user mentions a deck, slides, or a presentation.",
+      "tags": [
+        "tool",
+        "office"
+      ],
+      "source": "builtin",
+      "read_only": true
+    },
+    {
+      "name": "skill-creator",
+      "description": "Design and author DeepTutor skills (SKILL.md packages). Use when the user wants to create a new skill, improve an existing skill, or asks how skills work.",
+      "tags": [],
+      "source": "builtin",
+      "read_only": true
+    },
+    {
+      "name": "xlsx",
+      "description": "Read, create, or edit Excel spreadsheets (.xlsx/.xlsm) — sheet data, formulas, styles, charts, multi-sheet workbooks — and bulk .csv/.tsv tables; use whenever a spreadsheet is the input or the deliverable (extract/analyze data, add columns/formulas/formatting/charts, clean messy tables, build from scratch), but not for Google Sheets API or Word/PDF/script outputs.",
+      "tags": [
+        "tool",
+        "office"
+      ],
+      "source": "builtin",
+      "read_only": true
+    }
+  ],
+  "bbt_status": []
+}

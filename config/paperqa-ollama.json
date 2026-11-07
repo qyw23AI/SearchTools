@@ -7,7 +7,9 @@
         "litellm_params": {
           "model": "ollama/qwen3:8b",
           "api_base": "http://127.0.0.1:11434",
-          "temperature": 0
+          "temperature": 0,
+          "think": false,
+          "num_ctx": 8192
         }
       }
     ]
@@ -20,7 +22,9 @@
         "litellm_params": {
           "model": "ollama/qwen3:8b",
           "api_base": "http://127.0.0.1:11434",
-          "temperature": 0
+          "temperature": 0,
+          "think": false,
+          "num_ctx": 8192
         }
       }
     ]
@@ -29,6 +33,24 @@
   "embedding_config": {
     "kwargs": {
       "api_base": "http://127.0.0.1:11434"
+    }
+  },
+  "parsing": {
+    "multimodal": false,
+    "enrichment_llm": "ollama/qwen3:8b",
+    "enrichment_llm_config": {
+      "model_list": [
+        {
+          "model_name": "ollama/qwen3:8b",
+          "litellm_params": {
+            "model": "ollama/qwen3:8b",
+            "api_base": "http://127.0.0.1:11434",
+            "temperature": 0,
+            "think": false,
+            "num_ctx": 8192
+          }
+        }
+      ]
     }
   },
   "agent": {
@@ -40,7 +62,9 @@
           "litellm_params": {
             "model": "ollama/qwen3:8b",
             "api_base": "http://127.0.0.1:11434",
-            "temperature": 0
+            "temperature": 0,
+            "think": false,
+            "num_ctx": 8192
           }
         }
       ]
@@ -50,7 +74,8 @@
       "paper_directory": "papers",
       "index_directory": "index"
     },
-    "max_timesteps": 5
+    "max_timesteps": 5,
+    "agent_type": "fake"
   },
   "answer": {
     "evidence_k": 5,

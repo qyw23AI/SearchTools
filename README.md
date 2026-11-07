@@ -65,7 +65,7 @@ DeepTutor 需要在其自己的知识库界面导入所需论文；项目文献�
 
 **训练优先**：工作区提交的本地任务在检测到其他 GPU 程序时自动等待，串行执行；不能确认 GPU 状态时也等待。不会终止训练。原生 DeepTutor / GPT Researcher 中直接启动的任务由上游独立执行，不经过这个队列。
 
-本地 Qwen3 8B 是初始可用配置，复杂研究的质量需自行验证。调研和问答结果保留引擎返回的引用，应用不将其标记为已人工核实。OpenAlex 默认面向学术发现，不能等同于全网检索。
+本地 Qwen3 8B 是初始可用配置，复杂研究的质量需自行验证。16 GB 显存可手动升级到 `qwen2.5:14b-instruct`（Q4_K_M，约 9 GB）；本地中文 PaperQA2 建议使用 `agent_type=fake`，避免整句中文检索不到和工具参数错误。调研和问答结果保留引擎返回的引用，应用不将其标记为已人工核实。OpenAlex 默认面向学术发现，不能等同于全网检索。
 
 ## 更新与重复部署
 
@@ -107,7 +107,7 @@ journalctl --user -u searchtools-deeptutor.service -n 80
 python3 -m unittest discover -s tests -v
 ```
 
-工作区 Python 后端仅使用标准库；桌面外壳使用系统 Python 的 GTK / WebKit。网页无需 Node 构建步骤，Node 仅供 DeepTutor 上游前端运行。服务代码和接口见 [架构与边界](docs/ARCHITECTURE.md)，安装与验证记录见 [部署验收](docs/VALIDATION.md)。
+工作区 Python 后端仅使用标准库；桌面外壳使用系统 Python 的 GTK / WebKit。网页无需 Node 构建步骤，Node 仅供 DeepTutor 上游前端运行。服务代码和接口见 [架构与边界](docs/ARCHITECTURE.md)，安装与验证记录见 [部署验收](docs/VALIDATION.md)。文献管理工具的选型与 Zotero 集成方案见 [选型与集成方案](docs/文献管理工具选型与集成方案.md)，只读脑图原型见 [zotero_mindmap.py](scripts/zotero_mindmap.py)。
 
 关闭窗口不会中止后台工作区任务。工作区服务随用户登录启动；原生引擎在打开 App 时按需启动。
 

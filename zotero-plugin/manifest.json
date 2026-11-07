@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "SearchTools Evidence Bridge",
+  "version": "1.0.0",
+  "description": "Zotero bridge for SearchTools: exact page navigation, temporary evidence highlighting, and reverse card creation.",
+  "author": "SearchTools",
+  "icons": {
+    "48": "icon.png"
+  },
+  "applications": {
+    "zotero": {
+      "id": "evidence-bridge@searchtools.org",
+      "update_url": "https://raw.githubusercontent.com/qyw23AI/SearchTools/main/updates.json",
+      "strict_min_version": "6.999",
+      "strict_max_version": "9999.*"
+    }
+  }
+}

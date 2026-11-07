@@ -15,3 +15,7 @@ config.local.json
 /docs/workspace.jpg
 /三工具科研使用指南.md
 /统一科研App设计方案.md
+.tmp-*
+*.bak-*
+zotero-better-bibtex-*.xpi
+

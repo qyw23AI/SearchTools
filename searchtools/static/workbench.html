@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>学术实证与文献助手 · 证据工作台 v3</title>
+  <link rel="stylesheet" href="/workbench.css">
+</head>
+<body>
+  <div class="wb-shell">
+    <!-- Top Header & Status Bar -->
+    <header class="wb-header">
+      <div class="wb-title-row">
+        <div class="wb-brand">
+          <span class="wb-logo">⚖️</span>
+          <span class="wb-title">证据工作台</span>
+          <span class="wb-badge-version">v3</span>
+        </div>
+        <div class="wb-status-dots">
+          <span id="wb-dot-zotero" class="wb-pill-status" title="Zotero 本地连接状态">
+            <i class="dot"></i> Zotero
+          </span>
+          <span id="wb-dot-model" class="wb-pill-status" title="PaperQA2 当前同步模型">
+            <i class="dot ok"></i> <span id="wb-model-label">同步中...</span>
+          </span>
+          <button id="wb-btn-refresh" class="wb-icon-btn" title="刷新工作台数据">↻</button>
+          <a href="/" target="_blank" class="wb-icon-btn" title="在新标签页打开完整 SearchTools 工作区">⤢</a>
+        </div>
+      </div>
+
+      <!-- Scope & Citation Style Bar -->
+      <div class="wb-scope-row">
+        <label class="wb-scope-label" for="wb-scope-select">研究范围:</label>
+        <select id="wb-scope-select" class="wb-select"></select>
+        <button id="wb-btn-quick-new-scope" class="wb-btn wb-btn-secondary wb-btn-xs" style="white-space:nowrap;" title="新建研究范围">➕ 新建</button>
+        <select id="wb-cite-style" class="wb-select wb-select-sm" title="默认引用格式">
+          <option value="gbt7714" selected>GB/T 7714 (默认)</option>
+          <option value="pandoc">Pandoc [@key]</option>
+          <option value="apa">APA (Author, Year)</option>
+          <option value="bibtex">BibTeX</option>
+        </select>
+        <button id="wb-btn-clean-highlights" class="wb-btn wb-btn-secondary wb-btn-xs" style="white-space:nowrap;" title="一键清理 Zotero 中的临时论据高亮标注">🧹 清理高亮</button>
+      </div>
+
+      <!-- 4 Navigation Tabs -->
+      <nav class="wb-tabs" role="tablist">
+        <button class="wb-tab active" data-tab="trace" role="tab">
+          <span>本轮溯源</span>
+          <span id="wb-badge-trace" class="wb-tab-count">0</span>
+        </button>
+        <button class="wb-tab" data-tab="cards" role="tab">
+          <span>证据卡</span>
+          <span id="wb-badge-cards" class="wb-tab-count">0</span>
+        </button>
+        <button class="wb-tab" data-tab="scope" role="tab">
+          <span>研究范围</span>
+          <span id="wb-badge-scope" class="wb-tab-count">0</span>
+        </button>
+        <button class="wb-tab" data-tab="acquire" role="tab">
+          <span>补充文献</span>
+          <span id="wb-badge-acquire" class="wb-tab-count wb-count-warn">0</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Active Running Job Banner -->
+    <div id="wb-active-job-bar" class="wb-job-banner hidden">
+      <div class="wb-job-info">
+        <span class="wb-spinner"></span>
+        <span id="wb-job-msg">正在执行任务...</span>
+      </div>
+      <button id="wb-job-cancel" class="wb-btn wb-btn-danger wb-btn-xs">取消</button>
+    </div>
+
+    <!-- Main Tab Panels -->
+    <main class="wb-main">
+      <!-- Tab 1: Live Trace Timeline -->
+      <section id="wb-panel-trace" class="wb-panel active">
+        <div class="wb-section-toolbar">
+          <span class="wb-hint">实时追踪大模型调用 Zotero / PaperQA2 / 外部检索的每一步操作与覆盖度</span>
+        </div>
+        <div id="wb-trace-list" class="wb-list"></div>
+      </section>
+
+      <!-- Tab 2: Evidence Cards v2 -->
+      <section id="wb-panel-cards" class="wb-panel">
+        <div class="wb-filter-bar">
+          <input id="wb-card-search" type="search" class="wb-input" placeholder="搜索引文、论断、作者、citekey...">
+          <select id="wb-card-score" class="wb-select wb-select-sm">
+            <option value="0">全部分数</option>
+            <option value="5">≥ 5 分</option>
+            <option value="7">≥ 7 分</option>
+            <option value="8">≥ 8 分</option>
+          </select>
+          <label class="wb-checkbox-label">
+            <input type="checkbox" id="wb-card-pinned"> 仅星标
+          </label>
+        </div>
+        <div class="wb-batch-bar">
+          <span id="wb-selected-cards-count" class="wb-hint">已选 0 张</span>
+          <div class="wb-btn-group">
+            <button id="wb-btn-cite-selected" class="wb-btn wb-btn-primary wb-btn-xs" disabled>插入选中引用 (GB/T 7714)</button>
+            <button id="wb-btn-writeback-selected" class="wb-btn wb-btn-secondary wb-btn-xs" disabled>写回 Zotero 笔记</button>
+          </div>
+        </div>
+        <div id="wb-cards-list" class="wb-list"></div>
+      </section>
+
+      <!-- Tab 3: Research Scope & Manual PaperQA2 Trigger -->
+      <section id="wb-panel-scope" class="wb-panel">
+        <div class="wb-scope-summary" id="wb-scope-metrics"></div>
+
+        <div class="wb-card-box">
+          <div class="wb-box-title">从本地 Zotero 导入分类或检索加入当前范围</div>
+          <div class="wb-row-gap">
+            <select id="wb-zot-collection" class="wb-select">
+              <option value="">-- 选择 Zotero 分类 --</option>
+            </select>
+            <button id="wb-btn-sync-collection" class="wb-btn wb-btn-primary wb-btn-sm">同步分类并建索引</button>
+          </div>
+          <div class="wb-row-gap" style="margin-top:8px;">
+            <input id="wb-new-scope-name" type="text" class="wb-input" placeholder="或输入新课题范围名称...">
+            <button id="wb-btn-create-scope" class="wb-btn wb-btn-secondary wb-btn-sm">新建范围</button>
+          </div>
+        </div>
+
+        <div class="wb-card-box">
+          <div class="wb-box-title">手动直接向 PaperQA2 提问 / 核验覆盖度</div>
+          <textarea id="wb-manual-question" class="wb-textarea" rows="2" placeholder="输入具体学术问题或待核验的论断..."></textarea>
+          <div class="wb-btn-group" style="margin-top:6px;">
+            <button id="wb-btn-manual-coverage" class="wb-btn wb-btn-secondary wb-btn-xs">📊 检查覆盖度</button>
+            <button id="wb-btn-manual-evidence" class="wb-btn wb-btn-primary wb-btn-xs">🗂️ 提取证据卡</button>
+            <button id="wb-btn-manual-ask" class="wb-btn wb-btn-secondary wb-btn-xs">💡 深度综合问答</button>
+          </div>
+          <div id="wb-manual-result" class="wb-manual-output"></div>
+        </div>
+
+        <div class="wb-box-title" style="margin: 10px 0 6px;">当前范围文献列表</div>
+        <div id="wb-scope-papers" class="wb-list"></div>
+      </section>
+
+      <!-- Tab 4: Supplementary Literature Confirmation (Max 20 per batch) -->
+      <section id="wb-panel-acquire" class="wb-panel">
+        <div class="wb-card-box">
+          <div class="wb-box-title">手动输入 DOI / arXiv ID 补充文献 (单次上限 20 篇)</div>
+          <textarea id="wb-manual-identifiers" class="wb-textarea" rows="2" placeholder="每行或逗号分隔输入 DOI (如 10.1038/...) 或 arXiv ID (如 2401.12345)..."></textarea>
+          <div class="wb-row-gap" style="margin-top:6px;">
+            <button id="wb-btn-stage-identifiers" class="wb-btn wb-btn-secondary wb-btn-xs">解析元数据并加入待确认列表</button>
+          </div>
+        </div>
+        <div id="wb-acquire-batches" class="wb-list"></div>
+      </section>
+    </main>
+
+    <!-- Toast Feedback -->
+    <div id="wb-toast" class="wb-toast hidden"></div>
+  </div>
+  <script>window.__SEARCHTOOLS_TOKEN__ = "__TOKEN__";</script>
+  <script src="/workbench.js"></script>
+</body>
+</html>

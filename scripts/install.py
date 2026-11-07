@@ -84,7 +84,7 @@ def provision():
         marker.touch()
     marker=pqa/'.installed-2026.8.12'
     if not marker.exists():
-        run(uv,'pip','install','--python',pqa/'.venv/bin/python','paper-qa==2026.8.12')
+        run(uv,'pip','install','--python',pqa/'.venv/bin/python','paper-qa==2026.8.12','fhlmi==0.45.0','litellm==1.84.1','pillow')
         marker.touch()
     node=RUNTIME/'node'
     if not (node/'bin/node').exists():
