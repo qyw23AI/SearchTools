@@ -43,12 +43,20 @@ class Research:
                        (identity, run_id, kind, json.dumps(payload, ensure_ascii=False), revision, time.time()))
         return self.get(identity)
 
-    def packet(self, binding):
+    def packet(self, binding, refresh=True):
         atom = self.get(binding['atom_id'])
         card = self.store.get_evidence_card(binding['card_id'])
         if not card:
-            raise ValueError('Card not found')
-        location = self.store.locate_card(card['id'], force=True)
+            packet = {'binding_id':binding['id'], 'atom':atom, 'card':None, 'location':{'status':'deleted', 'spans':[]}}
+            packet['packet_revision'] = fingerprint(packet)
+            return packet
+        if refresh:
+            location = self.store.locate_card(card['id'], force=True)
+        else:
+            location = dict((card.get('provenance') or {}).get('location') or {'status':'unverified', 'spans':[]})
+            location.update(card_id=card['id'], attachment_key=card.get('attachment_key') or '',
+                            zotero_key=card.get('zotero_key') or '', quote=card.get('quote') or '',
+                            summary=card.get('summary') or '', score=card.get('score') or 0)
         packet = {'binding_id': binding['id'], 'atom': atom, 'card': {
             k: card.get(k) for k in ('id', 'quote', 'claim', 'title', 'attachment_key', 'zotero_key')},
             'source_context': (card.get('provenance') or {}).get('source_context', ''),
@@ -56,29 +64,30 @@ class Research:
         packet['packet_revision'] = fingerprint(packet)
         return packet
 
-    def review_state(self, run_id, atom_id):
+    def review_state(self, run_id, atom_id, refresh=True):
         bindings = [b for b in self.records(run_id, 'binding') if b['atom_id'] == atom_id]
         state = []
         for binding in bindings:
-            packet = self.packet(binding)
+            packet = self.packet(binding, refresh=refresh)
             reviews = [r for r in self.records(run_id, 'review') if r['binding_id'] == binding['id']]
             review = reviews[-1] if reviews else None
             current = review and review['packet_revision'] == packet['packet_revision']
             state.append({'binding_id': binding['id'], 'packet_revision': packet['packet_revision'],
-                          'review_id': review['id'] if current else None})
+                          'review_id': review['id'] if current else None,
+                          'source_deleted':packet['location'].get('status') == 'deleted'})
         return state
 
-    def accepted(self, run_id):
+    def accepted(self, run_id, refresh=True):
         accepted = []
         for binding in self.records(run_id, 'binding'):
-            packet = self.packet(binding)
+            packet = self.packet(binding, refresh=refresh)
             reviews = [r for r in self.records(run_id, 'review') if r['binding_id'] == binding['id']]
             if reviews:
                 review = reviews[-1]
                 if (review['packet_revision'] == packet['packet_revision'] and
                         review['decision'] == 'accept' and review['relation'] == 'supports' and
                         packet['location'].get('status') == 'exact'):
-                    state = self.review_state(run_id, binding['atom_id'])
+                    state = self.review_state(run_id, binding['atom_id'], refresh=refresh)
                     summaries = [r for r in self.records(run_id, 'atom_summary') if r.get('atom_id') == binding['atom_id']]
                     if summaries and summaries[-1].get('overall_verdict') == 'supported' and summaries[-1].get('review_set_revision') == fingerprint(state):
                         accepted.append(binding)
@@ -91,7 +100,7 @@ class Research:
             binding = self.get(row['id'])
             if binding['card_id'] != card_id:
                 continue
-            packet = self.packet(binding)
+            packet = self.packet(binding, refresh=False)
             reviews = [r for r in self.records(binding['run_id'], 'review') if r['binding_id'] == binding['id']]
             review = reviews[-1] if reviews else None
             result.append({'atom': packet['atom']['text'], 'run_id': binding['run_id'],
@@ -193,7 +202,7 @@ class Research:
             return self.save(rid, 'review', review)
         if operation == 'audit':
             return {'atoms': self.records(rid, 'atom'), 'bindings': self.records(rid, 'binding'),
-                    'reviews': self.records(rid, 'review'), 'review_states': [state for atom in self.records(rid, 'atom') for state in self.review_state(rid, atom['id'])], 'accepted_supports': self.accepted(rid)}
+                    'reviews': self.records(rid, 'review'), 'review_states': [state for atom in self.records(rid, 'atom') for state in self.review_state(rid, atom['id'], refresh=args.get('refresh_sources', True))], 'accepted_supports': self.accepted(rid, refresh=args.get('refresh_sources', True))}
         if operation == 'read':
             from .locate import resolve_attachment_pdf
             path = resolve_attachment_pdf(args['attachment_key'])

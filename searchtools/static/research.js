@@ -14,7 +14,9 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!response.ok) throw new Error(result.error || response.statusText);
     return result;
   }
+  let sequence = 0;
   refresh.onclick = async () => {
+    const request = ++sequence;
     output.replaceChildren();
     try {
       for (const run of await call('list', {})) {
@@ -22,16 +24,17 @@ window.addEventListener('DOMContentLoaded', () => {
         const title = document.createElement('summary');
         title.textContent = run.topic;
         section.append(title);
-        const audit = await call('audit', {run_id:run.id});
+        const audit = await call('audit', {run_id:run.id, refresh_sources:false});
         for (const binding of audit.bindings) {
           const row = document.createElement('div');
           const atom = audit.atoms.find(a => a.id === binding.atom_id);
           const state = audit.review_states?.find(s => s.binding_id === binding.id);
           const review = audit.reviews.find(r => r.id === state?.review_id);
           const label = document.createElement('p');
-          label.textContent = (atom?.text || '') + ' — ' + (review ? review.decision + ' / ' + review.relation + '：' + review.reason : '等待上层二审');
+          label.textContent = (atom?.text || '') + ' — ' + (state?.source_deleted ? '证据卡已删除' : review ? review.decision + ' / ' + review.relation + '：' + review.reason : '等待上层二审');
           const open = document.createElement('button');
-          open.textContent = '打开原文段落';
+          open.textContent = state?.source_deleted ? '证据卡已删除' : '打开原文段落';
+          open.disabled = Boolean(state?.source_deleted);
           open.onclick = async () => {
             try {
               const response = await fetch('/api/open-zotero', {method:'POST',headers:{'Content-Type':'application/json','X-SearchTools-Token':'local-mcp'},body:JSON.stringify({card_id:binding.card_id})});
@@ -49,8 +52,9 @@ window.addEventListener('DOMContentLoaded', () => {
           };
           row.append(label,open); section.append(row);
         }
-        output.append(section);
+        if (request === sequence) output.append(section);
       }
     } catch (error) {output.textContent=error.message;}
   };
+  window.addEventListener('evidence-cards-changed', () => refresh.click());
 });

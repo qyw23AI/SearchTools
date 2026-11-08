@@ -332,11 +332,12 @@ def handler(app):
                         last = getattr(app.store, '_last_zotero_poll', 0)
                         return self.send(200, {
                             'connected': (time.time() - last < 5.0) if last else False,
+                            'cards_revision': app.store.cards_revision(),
                             'last_poll': last,
                             'pending_actions': app.store.rows("SELECT COUNT(*) AS n FROM zotero_actions WHERE status IN ('pending','delivered') AND created>?", (time.time()-300,))[0]['n']
                         })
                     actions = app.store.pop_zotero_actions()
-                    return self.send(200, {'actions': actions})
+                    return self.send(200, {'actions': actions, 'cards_revision': app.store.cards_revision()})
 
                 if path == '/api/zotero/logs':
                     return self.send(200, {'logs': getattr(app.store, '_zotero_logs', [])})
@@ -538,16 +539,9 @@ def handler(app):
                     cid = app.store.save_evidence_card(pid, data.get('card', {}))
                     return self.send(200, {'ok': True, 'id': cid})
                 if self.path == '/api/evidence-cards/remove':
-                    cid = str(data.get('id') or '').strip()
-                    pid = data.get('project')
-                    if not pid and cid:
-                        r = app.store.rows('SELECT project FROM evidence_cards WHERE id=?', (cid,))
-                        if r:
-                            pid = r[0]['project']
-                    if not pid or not cid:
-                        return self.send(400, {'ok': False, 'error': 'Missing project or card id'})
-                    app.store.remove_evidence_card(pid, cid)
-                    return self.send(200, {'ok': True})
+                    cid = str(data.get('id') or data.get('card_id') or '').strip()
+                    result = app.store.remove_evidence_card(data.get('project'), cid)
+                    return self.send(200 if result['ok'] else 404, result)
                 if self.path == '/api/evidence-cards/pin':
                     cid = str(data.get('id') or '').strip()
                     pid = data.get('project')

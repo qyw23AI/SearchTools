@@ -493,7 +493,10 @@
   document.getElementById('wb-card-score').addEventListener('change', () => loadCards());
   document.getElementById('wb-card-pinned').addEventListener('change', () => loadCards());
 
+  let cardsRequestSequence = 0;
+  let observedCardsRevision = null;
   async function loadCards() {
+    const requestSequence = ++cardsRequestSequence;
     const q = document.getElementById('wb-card-search').value.trim();
     const minScore = document.getElementById('wb-card-score').value;
     const pinnedOnly = document.getElementById('wb-card-pinned').checked ? '1' : '0';
@@ -501,7 +504,11 @@
       const res = await api(
         `/api/evidence-cards?project=${encodeURIComponent(currentScopeId)}&q=${encodeURIComponent(q)}&min_score=${encodeURIComponent(minScore)}&pinned_only=${pinnedOnly}`
       );
+      if (requestSequence !== cardsRequestSequence) return;
       cachedCards = res.cards || [];
+      const visibleIds = new Set(cachedCards.map(c => c.id));
+      for (const id of selectedCardIds) if (!visibleIds.has(id)) selectedCardIds.delete(id);
+      updateBatchBar();
       document.getElementById('wb-badge-cards').textContent = String(cachedCards.length);
       renderCardsList();
     } catch (e) {
@@ -556,6 +563,7 @@
               }
               <button class="wb-btn wb-btn-secondary wb-btn-xs" data-pin-one="${esc(c.id)}">${c.pinned ? '⭐ 已星标' : '☆ 星标'}</button>
               <button class="wb-btn wb-btn-secondary wb-btn-xs" data-wb-one="${esc(c.id)}">📝 写回 Zotero</button>
+              <button class="wb-btn wb-btn-secondary wb-btn-xs" data-delete-card="${esc(c.id)}">删除证据卡</button>
             </div>
           </div>
         `;
@@ -567,6 +575,23 @@
         if (chk.checked) selectedCardIds.add(chk.dataset.id);
         else selectedCardIds.delete(chk.dataset.id);
         updateBatchBar();
+      });
+    });
+
+    el.querySelectorAll('[data-delete-card]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('删除此证据卡？Zotero 插件面板将同步移除。')) return;
+        btn.disabled = true;
+        try {
+          await api('/api/evidence-cards/remove', {method:'POST', body:JSON.stringify({id:btn.dataset.deleteCard, project:currentScopeId})});
+          selectedCardIds.delete(btn.dataset.deleteCard);
+          await loadCards();
+          window.dispatchEvent(new Event('evidence-cards-changed'));
+          showToast('证据卡已删除');
+        } catch (error) {
+          btn.disabled = false;
+          showToast('删除失败：' + error.message);
+        }
       });
     });
 
@@ -1003,6 +1028,10 @@
     if (!el) return;
     try {
       const res = await api('/api/zotero/actions?status=1');
+      if (observedCardsRevision !== null && observedCardsRevision !== res.cards_revision) {
+        loadCards(); window.dispatchEvent(new Event('evidence-cards-changed'));
+      }
+      observedCardsRevision = res.cards_revision;
       if (res && res.connected) {
         el.className = 'wb-badge ok';
         el.textContent = '🟢 Zotero 在线';

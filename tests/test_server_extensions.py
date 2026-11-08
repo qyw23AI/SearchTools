@@ -52,6 +52,19 @@ class ServerExtensionTests(unittest.TestCase):
         with urlopen(req) as resp:
             return json.loads(resp.read().decode('utf-8'))
 
+    def test_card_deletion_api_resolves_owner_and_updates_both_views(self):
+        self.app.store.save_evidence_card(self.project_id, {'id':'api-delete', 'zotero_key':'ABCDEFGH', 'quote':'Disposable test quote'})
+        before = self._req('/api/zotero/actions?status=1')['cards_revision']
+        removed = self._req('/api/evidence-cards/remove', {'card_id':'api-delete'})
+        self.assertTrue(removed['ok'])
+        self.assertNotEqual(before, removed['cards_revision'])
+        self.assertEqual(self._req('/api/evidence-cards?project=' + self.project_id)['cards'], [])
+        self.assertEqual(self._req('/api/evidence-cards/by-item?item=ABCDEFGH')['cards'], [])
+        self.assertTrue(self._req('/api/evidence-cards/remove', {'id':'api-delete'})['already_deleted'])
+        with self.assertRaises(HTTPError) as error:
+            self._req('/api/evidence-cards/remove', {'id':'absent'})
+        self.assertEqual(error.exception.code, 404)
+
     def test_models_api_get_and_update(self):
         # 1. GET /api/models
         data = self._req('/api/models')

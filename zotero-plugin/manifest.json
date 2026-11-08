@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "SearchTools Evidence Bridge",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Zotero bridge for SearchTools: exact page navigation, temporary evidence highlighting, and reverse card creation.",
   "author": "SearchTools",
   "icons": {

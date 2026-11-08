@@ -1,0 +1,4 @@
+interface:
+  display_name: "文献调研与研究选题"
+  short_description: "从主题出发比较真实论文实验，设计有出处的研究方向、大纲和实验方案"
+  default_prompt: "使用 $paper-direction-discovery 调研我的主题，提出有具体论文实验依据的研究方向与实验方案。"

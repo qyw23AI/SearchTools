@@ -1,0 +1,36 @@
+{
+  "scope": "7daaf16850c24c849e8e5adffb242dad",
+  "workbench_button_deleted": "ev_delete_acceptance_workbench_f67aad",
+  "zotero_runtime_delete": {
+    "id": "0b37b4c32d644bf69b3211c9a5e055e3",
+    "status": "done",
+    "error": "",
+    "result": {
+      "ok": true,
+      "id": "ev_delete_acceptance_zotero_05021f",
+      "project": "7daaf16850c24c849e8e5adffb242dad",
+      "already_deleted": false,
+      "cards_revision": "5"
+    }
+  },
+  "repeated_delete": {
+    "ok": true,
+    "id": "ev_delete_acceptance_zotero_05021f",
+    "project": "7daaf16850c24c849e8e5adffb242dad",
+    "already_deleted": true,
+    "cards_revision": "5"
+  },
+  "zotero_by_item_excludes_workbench_card": true,
+  "by_item_seconds": 0.043,
+  "resurrection_blocked": true,
+  "remaining_before_final_ui_delete": "ev_delete_acceptance_duplicate_21e550",
+  "cleanup": {
+    "ok": true,
+    "id": "ev_delete_acceptance_duplicate_21e550",
+    "project": "7daaf16850c24c849e8e5adffb242dad",
+    "already_deleted": false,
+    "cards_revision": "6"
+  },
+  "final_remaining_cards": 0,
+  "browser_auto_sync_observed": true
+}

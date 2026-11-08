@@ -60,6 +60,10 @@ def gpu_busy():
         return True, '无法读取 GPU 状态，任务等待中'
 
 
+class DeletedEvidenceCardError(ValueError):
+    pass
+
+
 class Store:
     def __init__(self, data, cfg=None):
         self.cfg = cfg
@@ -79,6 +83,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS trace_events(id TEXT PRIMARY KEY,scope_id TEXT,tool TEXT,status TEXT,summary TEXT,detail_json TEXT,created REAL);
             CREATE TABLE IF NOT EXISTS zotero_actions(id TEXT PRIMARY KEY,payload TEXT,status TEXT,lease_until REAL,created REAL,error TEXT);
             CREATE TABLE IF NOT EXISTS kv_meta(key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE IF NOT EXISTS evidence_card_deletions(card_id TEXT PRIMARY KEY, project TEXT NOT NULL, snapshot_json TEXT NOT NULL, deleted REAL NOT NULL);
+            INSERT OR IGNORE INTO kv_meta(key,value) VALUES('cards_revision','0');
             ''')
             if 'result_json' not in {row[1] for row in db.execute('PRAGMA table_info(zotero_actions)')}:
                 db.execute("ALTER TABLE zotero_actions ADD COLUMN result_json TEXT DEFAULT '{}'")
@@ -449,6 +455,15 @@ class Store:
         authors = card.get('authors')
         authors_str = json.dumps(authors, ensure_ascii=False) if isinstance(authors, list) else (str(authors or ''))
         with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM evidence_card_deletions WHERE card_id=?', (cid,)).fetchone():
+                raise DeletedEvidenceCardError('此证据卡已删除，旧任务不能重新生成同一张卡')
+            if card.get('job_id') and card.get('paper_id'):
+                for deleted in db.execute('SELECT snapshot_json FROM evidence_card_deletions WHERE project=?', (pid,)):
+                    old = json.loads(deleted['snapshot_json'])
+                    if all(old.get(key) == card.get(key) for key in ('job_id', 'paper_id', 'quote')):
+                        raise DeletedEvidenceCardError('此任务证据已删除，不能通过重新分配 ID 恢复')
+            db.execute("UPDATE kv_meta SET value=CAST(value AS INTEGER)+1 WHERE key='cards_revision'")
             found = [dict(r) for r in db.execute('SELECT id FROM evidence_cards WHERE project=? AND id=?', (pid, cid))]
             if found:
                 db.execute('''
@@ -807,11 +822,33 @@ class Store:
                 updated.append(self._enrich_card_v2(r))
         return updated
 
+    def cards_revision(self):
+        return self.rows("SELECT value FROM kv_meta WHERE key='cards_revision'")[0]['value']
+
     def remove_evidence_card(self, pid, cid):
-        self.project(pid)
+        if not cid:
+            raise ValueError('缺少证据卡 ID')
         with self.db() as db:
-            db.execute('DELETE FROM evidence_cards WHERE project=? AND id=?', (pid, cid))
-        return True
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM evidence_cards WHERE id=?', (cid,)).fetchone()
+            prior = db.execute('SELECT project FROM evidence_card_deletions WHERE card_id=?', (cid,)).fetchone()
+            owner = row['project'] if row else (prior['project'] if prior else None)
+            if owner is None:
+                return {'ok': False, 'id': cid, 'error': '未找到证据卡'}
+            if pid and owner != pid:
+                raise ValueError('证据卡不属于指定研究范围')
+            if row:
+                db.execute('INSERT INTO evidence_card_deletions VALUES(?,?,?,?)',
+                           (cid, owner, json.dumps(dict(row), ensure_ascii=False), time.time()))
+                db.execute('DELETE FROM evidence_cards WHERE id=?', (cid,))
+                db.execute("UPDATE kv_meta SET value=CAST(value AS INTEGER)+1 WHERE key='cards_revision'")
+                # An old queued open must not recreate highlights for a deleted card.
+                pending = db.execute("SELECT id,payload FROM zotero_actions WHERE status='pending'").fetchall()
+                for action in pending:
+                    if json.loads(action['payload']).get('card_id') == cid:
+                        db.execute("UPDATE zotero_actions SET status='failed',error='证据卡已删除' WHERE id=?", (action['id'],))
+        return {'ok': True, 'id': cid, 'project': owner, 'already_deleted': row is None,
+                'cards_revision': self.cards_revision()}
 
     def toggle_pin_evidence_card(self, pid, cid):
         self.project(pid)
@@ -941,7 +978,10 @@ class Store:
                 'pinned': 0,
                 'tags': ''
             }
-            cid = self.save_evidence_card(pid, card)
+            try:
+                cid = self.save_evidence_card(pid, card)
+            except DeletedEvidenceCardError:
+                continue
             provenance = {'version': 3, 'relation': ctx.get('relation'), 'limitation': ctx.get('limitation'),
                           'source_context': ctx.get('source_context'), 'validation': 'context_verbatim',
                           'claim_review': 'model_extracted_unreviewed',

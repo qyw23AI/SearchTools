@@ -13,11 +13,12 @@ var pollIntervalId = null;
 var chromeHandle = null;
 var sectionRefreshCallback = null;
 var pollBusy = false;
+var observedCardsRevision = null;
 var lastSelectionPopup = null;
 var lastCapture = null;
 
 const SEARCHTOOLS_HOST = 'http://127.0.0.1:8765';
-const BRIDGE_VERSION = '1.2.6';
+const BRIDGE_VERSION = '1.2.7';
 const ADDON_ID = 'evidence-bridge@searchtools.org';
 const PANE_ID = 'evidence-bridge-itempane-section';
 
@@ -849,6 +850,22 @@ async function renderEvidenceSectionAsync(doc, body, item, setSectionSummary) {
       }
     };
     actRow.appendChild(btnNote);
+    let btnDelete = doc.createElement('button');
+    btnDelete.textContent = '删除证据卡';
+    btnDelete.onclick = async () => {
+      if (!Zotero.getMainWindow().confirm('删除此证据卡？证据工作台将同步移除。')) return;
+      btnDelete.disabled = true;
+      try {
+        await deleteEvidenceCard(c);
+        cardEl.remove();
+        showToast('证据卡已同步删除', c.id);
+      } catch (error) {
+        btnDelete.disabled = false;
+        showToast('删除失败', String(error));
+      }
+    };
+    actRow.appendChild(btnDelete);
+
 
     cardEl.appendChild(actRow);
     listContainer.appendChild(cardEl);
@@ -958,6 +975,13 @@ async function acceptanceCapture(action) {
     selection_quote: text, original_card_id: action.card_id};
 }
 
+async function deleteEvidenceCard(card) {
+  let result = await httpPost(`${SEARCHTOOLS_HOST}/api/evidence-cards/remove`, {id: card.id, project: card.project});
+  if (!result?.ok) throw new Error(result?.error || '后端未确认删除');
+  if (sectionRefreshCallback) sectionRefreshCallback();
+  return result;
+}
+
 function startActionPoller() {
   if (pollIntervalId) return;
   pollIntervalId = setInterval(async () => {
@@ -965,6 +989,10 @@ function startActionPoller() {
     pollBusy = true;
     try {
       let data = await httpGet(`${SEARCHTOOLS_HOST}/api/zotero/actions`);
+      if (data.cards_revision != null && data.cards_revision !== observedCardsRevision) {
+        observedCardsRevision = data.cards_revision;
+        if (sectionRefreshCallback) sectionRefreshCallback();
+      }
       for (let action of data.actions || []) {
         try {
           let result;
@@ -972,6 +1000,8 @@ function startActionPoller() {
             result = action.locate ? await highlightAndOpenCard(action.locate) : await handleCardOpen(action.card_id);
           } else if (action.action === 'acceptance_capture') {
             result = await acceptanceCapture(action);
+          } else if (action.action === 'delete_card' && action.card_id) {
+            result = await deleteEvidenceCard({id:action.card_id, project:action.project});
           } else if (action.action === 'cleanup') {
             result = await cleanupTempAnnotations();
           } else {

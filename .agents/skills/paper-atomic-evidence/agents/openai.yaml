@@ -1,0 +1,4 @@
+interface:
+  display_name: "论点方法拆解与证据绑定"
+  short_description: "拆解论文论点和方法，绑定真实段落证据并在工作台与 Zotero 中溯源"
+  default_prompt: "使用 $paper-atomic-evidence 拆解我的论文大纲和方法，为每项论点寻找可定位并核验的段落证据。"
