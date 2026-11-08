@@ -17,7 +17,7 @@ var lastSelectionPopup = null;
 var lastCapture = null;
 
 const SEARCHTOOLS_HOST = 'http://127.0.0.1:8765';
-const BRIDGE_VERSION = '1.2.2';
+const BRIDGE_VERSION = '1.2.3';
 const ADDON_ID = 'evidence-bridge@searchtools.org';
 const PANE_ID = 'evidence-bridge-itempane-section';
 
@@ -251,11 +251,12 @@ async function highlightAndOpenCard(cardData) {
   }
 
   // Check if temporary annotation already exists for this card
-  let cardTag = '#card-' + cardId;
   let annots = attachment.getAnnotations ? attachment.getAnnotations() : [];
   let targetAnnot = null;
   for (let a of annots) {
-    if (a.hasTag('#evidence-temp') && a.hasTag(cardTag)) {
+    let comment = a.annotationComment || '';
+    let hasLegacyTag = a.hasTag && (a.hasTag('#card-' + cardId) || a.hasTag('card-' + cardId) || a.hasTag('#evidence-temp'));
+    if (comment.includes(`【论证支撑证据卡 ${cardId}】`) || comment.includes(`[card:${cardId}]`) || hasLegacyTag) {
       targetAnnot = a;
       break;
     }
@@ -282,12 +283,10 @@ async function highlightAndOpenCard(cardData) {
         pageIndex: pageIndex,
         rects: rects
       });
-      targetAnnot.setTags([
-        { tag: '#evidence-temp' },
-        { tag: cardTag }
-      ]);
+      // 绝不为高亮打 card- 或 evidence- 标签，防止污染 Zotero 全局标签选择器 (Tag Selector)
+      targetAnnot.setTags([]);
       await targetAnnot.saveTx();
-      log(`Created temporary evidence highlight annotation: ${targetAnnot.key}`);
+      log(`Created temporary evidence highlight annotation (tagless): ${targetAnnot.key}`);
     } catch (err) {
       log(`Could not create annotation: ${err}`);
       throw err;
@@ -329,6 +328,29 @@ async function highlightAndOpenCard(cardData) {
   return receipt;
 }
 
+async function purgeLegacyEvidenceTags() {
+  try {
+    await waitForZotero();
+    let sql = "SELECT tagID FROM tags WHERE name LIKE '#card-%' OR name LIKE 'card-%' OR name LIKE '#evidence-%' OR name LIKE 'evidence-%'";
+    let tagIDs = await Zotero.DB.columnQueryAsync(sql);
+    if (tagIDs && tagIDs.length > 0) {
+      log(`purgeLegacyEvidenceTags: erasing ${tagIDs.length} legacy evidence tags from library: ${JSON.stringify(tagIDs)}`);
+      if (Zotero.Tags && typeof Zotero.Tags.erase === 'function') {
+        await Zotero.Tags.erase(tagIDs);
+      } else {
+        await Zotero.DB.executeTransaction(async function () {
+          let placeholders = tagIDs.map(() => '?').join(',');
+          await Zotero.DB.queryAsync(`DELETE FROM itemTags WHERE tagID IN (${placeholders})`, tagIDs);
+          await Zotero.DB.queryAsync(`DELETE FROM tags WHERE tagID IN (${placeholders})`, tagIDs);
+        });
+      }
+      log(`purgeLegacyEvidenceTags: successfully cleared all card/evidence-temp tags`);
+    }
+  } catch (err) {
+    log(`purgeLegacyEvidenceTags error: ${err}`);
+  }
+}
+
 async function cleanupTempAnnotations() {
   try {
     await waitForZotero();
@@ -343,10 +365,16 @@ async function cleanupTempAnnotations() {
         let intId = parseInt(rawId);
         try {
           let it = await Zotero.Items.getAsync(intId);
-          if (it && it.hasTag && (it.hasTag('#evidence-temp') || it.hasTag('evidence-temp'))) {
-            log(`cleanupTempAnnotations: found temporary annotation ${it.id} (${it.key}), erasing...`);
-            await it.eraseTx();
-            count++;
+          if (it) {
+            let comment = it.annotationComment || '';
+            let hasLegacyTag = it.hasTag && (it.hasTag('#evidence-temp') || it.hasTag('evidence-temp') ||
+              (it.getTags && it.getTags().some(t => t.tag && (t.tag.startsWith('#card-') || t.tag.startsWith('card-')))));
+            let isTempEvidence = comment.includes('【论证支撑证据卡') || comment.includes('[evidence-temp]') || hasLegacyTag;
+            if (isTempEvidence) {
+              log(`cleanupTempAnnotations: found temporary annotation ${it.id} (${it.key}), erasing...`);
+              await it.eraseTx();
+              count++;
+            }
           }
         } catch (itemErr) {
           log(`Error inspecting annotation item ${intId}: ${itemErr}`);
@@ -356,11 +384,14 @@ async function cleanupTempAnnotations() {
       log(`Error querying itemAnnotations: ${annotErr}`);
     }
 
+    // 彻底清除 Zotero 标签选择器中所有历史残留的 card- 与 evidence- 标签
+    await purgeLegacyEvidenceTags();
+
     log(`Cleaned up ${count} temporary evidence annotations`);
     if (count > 0) {
-      showToast('🧹 临时高亮已清理', `已成功清除 ${count} 条证据高亮标注，文库已恢复整洁`);
+      showToast('🧹 临时高亮已清理', `已成功清除 ${count} 条证据高亮标注，标签栏已同步净化`);
     } else {
-      showToast('🧹 临时高亮已清理', '当前没有需要清理的临时高亮标注');
+      showToast('🧹 临时高亮已清理', '当前没有需要清理的临时高亮标注，标签栏已同步净化');
     }
     return count;
   } catch (e) {
@@ -377,15 +408,18 @@ async function createChildNoteForItem(parentItem, card, bibEntry) {
   let claimStr = card.claim || '未命名论点';
   let quoteStr = card.quote || '';
 
-  // Check if a child note already exists for this card
-  let cardTag = '#card-' + cardId;
+  // Check if a child note already exists for this card by HTML content or legacy tag
   let childNoteIds = parentItem.getNotes ? parentItem.getNotes() : [];
   let existingNote = null;
   for (let nId of childNoteIds) {
     let noteItem = await Zotero.Items.getAsync(parseInt(nId));
-    if (noteItem && noteItem.hasTag && noteItem.hasTag(cardTag)) {
-      existingNote = noteItem;
-      break;
+    if (noteItem) {
+      let noteHtml = noteItem.getNote() || '';
+      let hasLegacyTag = noteItem.hasTag && (noteItem.hasTag('#card-' + cardId) || noteItem.hasTag('card-' + cardId));
+      if (noteHtml.includes(`【学术实证卡 ${cardId}】`) || noteHtml.includes(`searchtools-card-id: ${cardId}`) || hasLegacyTag) {
+        existingNote = noteItem;
+        break;
+      }
     }
   }
 
@@ -394,6 +428,7 @@ async function createChildNoteForItem(parentItem, card, bibEntry) {
   noteItem.parentID = parentItem.id;
 
   let html = `
+    <!-- searchtools-card-id: ${escapeHtml(cardId)} -->
     <p><strong>【学术实证卡 ${escapeHtml(cardId)}】</strong></p>
     <p><strong>💡 支撑论点：</strong>${escapeHtml(claimStr)}</p>
     <p><strong>📜 论据原文：</strong></p>
@@ -406,10 +441,8 @@ async function createChildNoteForItem(parentItem, card, bibEntry) {
   `;
 
   noteItem.setNote(html);
-  noteItem.setTags([
-    { tag: '#evidence-card' },
-    { tag: cardTag }
-  ]);
+  // 关键修复：绝不添加 cardTag 或 evidence-card 标签，保持笔记内容自包含且不污染全局标签栏
+  noteItem.setTags([]);
   await noteItem.saveTx();
   log(`Saved child note for card ${cardId} (note ID: ${noteItem.id})`);
   return noteItem;
@@ -1223,6 +1256,12 @@ async function startup(data, reason) {
 
   log('SearchTools Evidence Bridge build ' + BRIDGE_VERSION + ' started (registered version ' + version + ')');
   reconcileRegisteredVersion(rootURI, version);
+
+  try {
+    await purgeLegacyEvidenceTags();
+  } catch (e) {
+    log('Notice on purgeLegacyEvidenceTags in startup: ' + e);
+  }
 }
 
 function shutdown(data, reason) {
