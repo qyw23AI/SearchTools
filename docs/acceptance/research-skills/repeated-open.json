@@ -1,0 +1,30 @@
+[
+  {
+    "id": "636ef81516d44a46a575d4ca7ed2f512",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.5",
+      "attachment_key": "QF757IAF",
+      "page_index": 6,
+      "annotation_key": "B9HYTSN6",
+      "annotation_in_reader": true,
+      "page_rendered": true,
+      "selected_annotation": true
+    }
+  },
+  {
+    "id": "1ad6753f0b9440af9c2ae635c3e524dd",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.5",
+      "attachment_key": "QF757IAF",
+      "page_index": 6,
+      "annotation_key": "B9HYTSN6",
+      "annotation_in_reader": true,
+      "page_rendered": true,
+      "selected_annotation": true
+    }
+  }
+]

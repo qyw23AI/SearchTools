@@ -1,0 +1,44 @@
+[
+  {
+    "id": "7ac699d283984907a5945b5c028b3b75",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.6",
+      "attachment_key": "QF757IAF",
+      "page_index": 6,
+      "annotation_key": "B9HYTSN6",
+      "annotation_in_reader": true,
+      "page_rendered": true,
+      "selected_annotation": true
+    }
+  },
+  {
+    "id": "d8f28d7882dd4567a19a34c5f2e6d2ff",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.6",
+      "attachment_key": "QF757IAF",
+      "page_index": 6,
+      "annotation_key": "B9HYTSN6",
+      "annotation_in_reader": true,
+      "page_rendered": true,
+      "selected_annotation": true
+    }
+  },
+  {
+    "id": "efb59878ed934820a324be04619b565d",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.6",
+      "attachment_key": "QF757IAF",
+      "page_index": 6,
+      "annotation_key": "B9HYTSN6",
+      "annotation_in_reader": true,
+      "page_rendered": true,
+      "selected_annotation": true
+    }
+  }
+]

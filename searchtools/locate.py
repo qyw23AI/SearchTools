@@ -100,6 +100,12 @@ def locate_quote_in_pdf(pdf_path: str | Path, quote: str, page_hint: str = '') -
                 for bi, block in enumerate(page.get_text('rawdict', sort=True)['blocks']):
                     if block.get('type') != 0:
                         continue
+                    # A standalone page number in the footer is layout metadata.
+                    # Keep numeric table/body blocks; only remove bottom-margin folios.
+                    block_text = ''.join(char['c'] for line in block.get('lines', [])
+                                         for span in line.get('spans', []) for char in span.get('chars', []))
+                    if block_text.strip().isdigit() and block['bbox'][1] > page.rect.height - 65:
+                        continue
                     pid = f'{pdf_hash[:16]}:p{pi}:b{bi}'
                     start = len(text)
                     for li, line in enumerate(block.get('lines', [])):

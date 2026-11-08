@@ -174,3 +174,17 @@ Skill 1 → Skill 2 的交接对象最少包含：
 正式引文句的门槛：来源/版本明确、完整 quote 已回验、所用段落定位有效、binding 的支持关系经核验且条件不超出原文。存在反驳时同时展示；矛盾未解决的 atom 不列为无争议支持。
 
 打开动作状态：`queued → delivered → rendered`，或失败/超时；服务端与插件重投幂等。离线、版本不兼容、哈希改变、重复引文、缺附件分别返回原因。普通页级打开允许用于探索，但不能使卡片变成已核验。
+
+## 7. Skill 2 上层模型复核契约（v1.1）
+
+采用三个操作。旧的 research_bindings(review) 仍用于人工复核，PaperQA2 的 verify_claim 和 research_match 只写下层结果。上层复核由当前使用 Skill 的对话通过 MCP 提交，服务端不另启模型代审。
+
+| 操作（拟新增） | 输入与输出 | 职责 |
+| --- | --- | --- |
+| research_review_packets | run_id、atom_ids、cursor、limit → packet_id/revision、binding_id、原句与 atom、原文/相邻段、实验条件/表注、可续读的 span ID、下层初判 | 用已冻结附件取证。输出缺失项、总数与下一页。初判单独列出，允许上层先读原文 |
+| research_submit_review | packet_id/revision、binding_id、request_id、decision、relation、span_ids、reason、condition_mismatches、next_query? | 上层逐绑定提交。decision 枚举 accept / reject / request_more。accept 可确认支持、反驳或限定。reject 不参与正式引用。request_more 附缺失材料或检索式 |
+| research_finalize_atom | atom_id/revision、review_set_revision、overall_verdict、采用/反驳的 binding IDs、冲突说明 | 上层综合判定 supported / qualified / contradicted / disputed / insufficient。存在待审绑定时只输出 partial，保留待办 |
+
+新建追加写入的 binding_reviews 与 atom_reviews。记录上下层判定、运行来源、审核时间、审查材料版本、模型身份（运行时可得才记录，缺省写 unknown）、可展示的论据与结论。以角色和调用来源区分两层，不要求两个不同的模型供应商。下层 worker 不可写上层审核事件。工具校验 span 与附件归属、版本及请求幂等。该记录能表明谁提交了哪些依据，语义质量仍通过人工标注样本验收。
+
+待审 → 已审 / 退回补证；重检出现新材料或更新原句、PDF、摘录、表注时，生成新的 packet_revision，旧决定过期。过期并发提交返回 409。复核后新增反证使 atom 汇总失效；未改变的单条绑定审查可复用。所有正式引用与导出复核当前版本及使用目的；反驳卡仅供反驳用途引用。阅读器的高亮使用独立的精确定位门槛，待审时仍可打开。旧 skill 或旧项目未选择此工作流时保持原接口兼容；Skill 2 项目内的旧入口也执行同一引用门槛。

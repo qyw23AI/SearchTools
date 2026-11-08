@@ -1,0 +1,6 @@
+source,location,setting,baseline,result,limitation
+Proxy Target,Fig2 physical p5,InvertedDoublePendulum-v4 target update,SNN target vs proxy,smoother target transitions,not real quadruped hardware
+Proxy Target,Table8 physical p26,LIF five seeds,Vanilla LIF vs PT-LIF,Walker2d 1862±1450 vs 4314±423,maximum average return not hardware energy
+Proxy Target,Table11 physical p27,ANN TD3 five seeds,ANN vs PN-ANN,APG -8.38%,cannot generalize proxy gains to all architectures
+SRL-CPG,Table7 physical p8,T=1 45nm operation cost model,DRL-CPG vs SRL-CPG,31.42nJ vs 4.84nJ reported84.60%,estimated network energy not measured whole robot energy
+SRL-CPG,Conclusion physical p8,Webots simplified quadruped,not applicable,no physical robot evaluation,hardware validation remains proposed work

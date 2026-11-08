@@ -62,6 +62,8 @@ def _resolve_scope_id(store: Store, scope_id: str = '') -> tuple[str, dict]:
         for p in projects:
             if p['id'] == scope_id.strip() or p['name'].casefold() == scope_id.strip().casefold():
                 return p['id'], p
+    if scope_id:
+        raise ValueError('指定的研究范围不存在')
     if projects:
         return projects[0]['id'], projects[0]
     pid = store.create_project('学术实证研究')
@@ -382,11 +384,8 @@ def verify_claim(claim: str, scope_id: str = "", wait_seconds: int = 85) -> str:
         res = outcome['result']
         cards = outcome.get('cards') or []
         ans_text = str(res.get('answer') or '')
-        verdict = 'insufficient'
-        if any(w in ans_text.lower() for w in ('contradict', '矛盾', '反驳', '不一致', '相反')):
-            verdict = 'contradicted'
-        elif cards and max((c.get('score') or 0) for c in cards) >= 6 and not ('cannot answer' in ans_text.lower()):
-            verdict = 'supported'
+        # A lower-model answer is a candidate assessment, not upper review.
+        verdict = 'pending_upper_review' if cards else 'insufficient'
 
         payload = {
             'claim': claim,
@@ -605,7 +604,52 @@ def cards_writeback_zotero(card_ids: list[str]) -> str:
 # Server Entrypoint
 # ==============================================================================
 
+def research_call(operation: str, arguments: dict) -> str:
+    """Research runs, atoms, binding packets and caller-authored source reviews.
+
+    Call capabilities first. Read review_packets before submit_review. The current
+    agent must read the returned original paragraphs and supply its own decision.
+    """
+    from .research import Research
+    return json.dumps(Research(_store()).call(operation, arguments), ensure_ascii=False)
+
+
+def research_review_packets(run_id: str, cursor: int = 0, limit: int = 5) -> str:
+    """Read source paragraphs and target atoms before caller-authored second review."""
+    return research_call('review_packets', {'run_id':run_id, 'cursor':cursor, 'limit':limit})
+
+
+def research_submit_review(run_id: str, binding_id: str, packet_revision: str,
+                           decision: str, relation: str, reason: str, span_ids: list[str]) -> str:
+    """Persist the current agent's own source-grounded assessment, never a worker verdict."""
+    return research_call('submit_review', dict(run_id=run_id, binding_id=binding_id,
+        packet_revision=packet_revision, decision=decision, relation=relation, reason=reason, span_ids=span_ids))
+
+
+def research_finalize_atom(run_id: str, atom_id: str, overall_verdict: str, reason: str) -> str:
+    """Finalize an atom after all its candidate bindings have current caller reviews."""
+    return research_call('finalize_atom', dict(run_id=run_id, atom_id=atom_id,
+                                              overall_verdict=overall_verdict, reason=reason))
+
+
+def cards_locate(card_ids: list[str], force: bool = False) -> str:
+    """Verify complete original quotations and return all PDF paragraph spans."""
+    return json.dumps([_store().locate_card(cid, force=force) for cid in card_ids], ensure_ascii=False)
+
+
+def cards_open(card_id: str) -> str:
+    """Queue a verified paragraph highlight; poll cards_action_status for rendering."""
+    return json.dumps(_api('/api/open-zotero', 'POST', {'card_id': card_id}), ensure_ascii=False)
+
+
+def cards_action_status(action_id: str) -> str:
+    """Read actual Zotero Reader rendering acknowledgment without requeueing."""
+    return json.dumps(_api('/api/zotero/action-status?id=' + urllib.parse.quote(action_id)), ensure_ascii=False)
+
+
 ALL_TOOLS = [
+    research_call, research_review_packets, research_submit_review, research_finalize_atom,
+    cards_locate, cards_open, cards_action_status,
     scope_create,
     scope_status,
     coverage_check,
@@ -645,12 +689,32 @@ def main():
 
 def _run_stdio_fallback():
     """Standard library JSON-RPC 2.0 stdio fallback."""
+    import inspect
+    import typing
+    def input_schema(fn):
+        hints = typing.get_type_hints(fn)
+        properties, required = {}, []
+        for name, parameter in inspect.signature(fn).parameters.items():
+            annotation = hints.get(name, str)
+            origin = typing.get_origin(annotation)
+            if origin in (typing.Union, getattr(__import__('types'), 'UnionType', None)):
+                annotation = next((t for t in typing.get_args(annotation) if t is not type(None)), str)
+                origin = typing.get_origin(annotation)
+            kind = {str:'string', int:'integer', float:'number', bool:'boolean', dict:'object', list:'array'}.get(origin or annotation, 'string')
+            field = {'type':kind}
+            if kind == 'array':
+                field['items'] = {'type':'string'} if typing.get_args(annotation) == (str,) else {}
+            properties[name] = field
+            if parameter.default is inspect.Parameter.empty:
+                required.append(name)
+        return {'type':'object', 'properties':properties, 'required':required}
+
     tool_map = {fn.__name__: fn for fn in ALL_TOOLS}
     tools_schema = [
         {
             'name': fn.__name__,
             'description': (fn.__doc__ or '').strip(),
-            'inputSchema': {'type': 'object', 'properties': {}}
+            'inputSchema': input_schema(fn)
         }
         for fn in ALL_TOOLS
     ]

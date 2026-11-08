@@ -897,7 +897,7 @@ class Store:
             low_sum = summary_txt.lower()
             if score_val < 5.0 or not summary_txt or not quote_txt:
                 continue
-            if any(k in low_sum for k in ('bibliography', 'is a list of references', 'does not contain', 'does not provide', 'not applicable', 'irrelevant')):
+            if any(k in low_sum for k in ('bibliography', 'is a list of references')):
                 continue
 
             # Align Claim & Quote:
@@ -963,6 +963,21 @@ class Store:
         cards = [raw_rows[cid] for cid in card_ids if cid in raw_rows]
         if not cards:
             return ''
+
+        # Research scopes require a current caller review before citation.
+        from .research import Research
+        research = Research(self)
+        runs = self.rows("SELECT id,payload FROM research_records WHERE kind='run'")
+        for card in cards:
+            matching = [r for r in runs if json.loads(r['payload'])['scope_id'] == card['project']]
+            if matching:
+                parts = doc_ref.split(':')
+                if len(parts) != 3 or parts[0] != 'research':
+                    raise ValueError('研究引用须指定 research:run_id:atom_id，以校验具体论点绑定')
+                allowed = {b['card_id'] for run in matching if run['id'] == parts[1]
+                           for b in research.accepted(run['id']) if b['atom_id'] == parts[2]}
+                if card['id'] not in allowed:
+                    raise ValueError('此论点与证据的绑定尚未通过当前版本的上层支持关系二审: ' + card['id'])
 
         # Record usage provenance
         self.record_card_usage([c['id'] for c in cards], doc_ref=doc_ref, anchor=anchor)

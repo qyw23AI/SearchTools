@@ -287,6 +287,10 @@ def handler(app):
                 if path == '/api/evidence-cards/by-item':
                     item_key = q.get('item', [''])[0]
                     cards = [app.store._enrich_card_v2(r) for r in app.store.rows('SELECT * FROM evidence_cards WHERE zotero_key=? ORDER BY score DESC', (item_key,))]
+                    from .research import Research
+                    research = Research(app.store)
+                    for card in cards:
+                        card['research_reviews'] = research.card_reviews(card['id'])
                     return self.send(200, {'cards': cards, 'total': len(cards)})
 
                 if path == '/api/deeptutor/model-state':
@@ -402,6 +406,7 @@ def handler(app):
                     '/workbench': 'workbench.html',
                     '/workbench.html': 'workbench.html',
                     '/workbench.js': 'workbench.js',
+                    '/research.js': 'research.js',
                     '/workbench.css': 'workbench.css',
                     '/deeptutor_companion.js': 'deeptutor_companion.js',
                     '/static/deeptutor_companion.js': 'deeptutor_companion.js',
@@ -434,6 +439,9 @@ def handler(app):
                     return self.send(200, {'id': app.store.import_paper(pid, name, raw)})
 
                 data = json.loads(raw)
+                if self.path == '/api/research':
+                    from .research import Research
+                    return self.send(200, Research(app.store).call(data['operation'], data.get('arguments', {})))
                 if self.path == '/api/projects':
                     return self.send(200, {'id': app.store.create_project(data['name'])})
 

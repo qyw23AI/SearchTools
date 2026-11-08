@@ -17,7 +17,7 @@ var lastSelectionPopup = null;
 var lastCapture = null;
 
 const SEARCHTOOLS_HOST = 'http://127.0.0.1:8765';
-const BRIDGE_VERSION = '1.2.3';
+const BRIDGE_VERSION = '1.2.6';
 const ADDON_ID = 'evidence-bridge@searchtools.org';
 const PANE_ID = 'evidence-bridge-itempane-section';
 
@@ -170,9 +170,10 @@ async function waitForValue(check, message, timeout = 15000) {
   throw new Error(message);
 }
 
-async function getReadyReader(attachment) {
+async function getReadyReader(attachment, preferred = null) {
   let reader = await waitForValue(
-    () => Zotero.Reader._readers.find(r => r.itemID === attachment.id && r._internalReader),
+    () => (preferred?.itemID === attachment.id && preferred._internalReader ? preferred :
+      Zotero.Reader._readers.slice().reverse().find(r => r.itemID === attachment.id && r._internalReader)),
     'Zotero 阅读器未能初始化');
   let timer;
   try {
@@ -255,7 +256,7 @@ async function highlightAndOpenCard(cardData) {
   let targetAnnot = null;
   for (let a of annots) {
     let comment = a.annotationComment || '';
-    let hasLegacyTag = a.hasTag && (a.hasTag('#card-' + cardId) || a.hasTag('card-' + cardId) || a.hasTag('#evidence-temp'));
+    let hasLegacyTag = a.hasTag && (a.hasTag('#card-' + cardId) || a.hasTag('card-' + cardId));
     if (comment.includes(`【论证支撑证据卡 ${cardId}】`) || comment.includes(`[card:${cardId}]`) || hasLegacyTag) {
       targetAnnot = a;
       break;
@@ -301,8 +302,15 @@ async function highlightAndOpenCard(cardData) {
   }
 
   log(`Opening file attachment ${attachment.key} (id: ${attachment.id}) at pageIndex ${pageIndex}, annot: ${location.annotationID || 'none'}`);
-  await Zotero.Reader.open(attachment.id, location);
-  let reader = await getReadyReader(attachment);
+  // Hidden/minimized windows can defer PDF.js page rendering. Activate the
+  // application before waiting for a rendering receipt, not after it.
+  let mainWindow = Zotero.getMainWindow();
+  if (mainWindow) {
+    if (mainWindow.restore) mainWindow.restore();
+    mainWindow.focus();
+  }
+  let openedReader = await Zotero.Reader.open(attachment.id, location);
+  let reader = await getReadyReader(attachment, openedReader);
   if (!targetAnnot) throw new Error('没有可显示的已验证高亮');
   // Reader.setAnnotations accepts Zotero.Item objects, not reader JSON.
   await reader.setAnnotations([targetAnnot]);
@@ -310,7 +318,9 @@ async function highlightAndOpenCard(cardData) {
   let receipt = await waitForValue(() => {
     let state = inspectReader(reader, targetAnnot.key);
     return state.page_index === pageIndex && state.annotation_in_reader && state.page_rendered ? state : null;
-  }, '阅读器未确认目标页渲染或批注加载');
+  }, '阅读器未确认目标页渲染或批注加载').catch(error => {
+    throw new Error(error.message + ' · ' + JSON.stringify(inspectReader(reader, targetAnnot.key)));
+  });
   // Prefer the running reader's own sort-index algorithm over guessed PDF height.
   let nativeMeta = reader._internalReader._primaryView.getAnnotationMeta?.(Components.utils.cloneInto({pageIndex, rects}, reader._iframeWindow));
   if (nativeMeta?.sortIndex && targetAnnot.annotationSortIndex !== nativeMeta.sortIndex) {
@@ -720,6 +730,12 @@ async function renderEvidenceSectionAsync(doc, body, item, setSectionSummary) {
     pageBadge.style.cssText = 'font-size: 10px; background: #eff6ff; color: #1d4ed8; padding: 1px 5px; border-radius: 3px; border: 1px solid #bfdbfe; font-weight: 500;';
     badges.appendChild(pageBadge);
 
+    for (let review of (c.research_reviews || [])) {
+      let reviewLabel = doc.createElement('div');
+      reviewLabel.textContent = '上层二审 ' + review.status + ' · ' + review.atom;
+      reviewLabel.title = review.reason || '等待上层模型读取原文并审查';
+      badges.appendChild(reviewLabel);
+    }
     cHead.appendChild(badges);
 
     // Pin Star Button

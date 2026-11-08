@@ -1,0 +1,128 @@
+{
+  "skill1_run": "040b3be06f6b4785aeb790ee931e52be",
+  "skill2_solo_run": "d7630899decb4924a39df0ee8f2cbaa9",
+  "joint_child_run": "a6cd815ae06e4c4a8fe8dafdac4c6a4c",
+  "joint_audit": {
+    "atoms": [
+      {
+        "text": "Proxy Target代理网络仅训练使用，部署时被丢弃。",
+        "type": "reported_result",
+        "original_sentence": "Proxy Target代理网络仅训练使用，部署时被丢弃。",
+        "outline_node": "",
+        "id": "39a80dc2148c43df82404af9cf7ba68a",
+        "revision": "6b41cce6291d8cb29a9391e02d48d2125040916e98fc53a0426e213381b3c141"
+      }
+    ],
+    "bindings": [
+      {
+        "atom_id": "39a80dc2148c43df82404af9cf7ba68a",
+        "card_id": "ev_skill_proxy_acceptance",
+        "lower_verdict": "unreviewed",
+        "id": "8bcb2deb8c08408d95e1b8be188d5ca9",
+        "revision": "d46cddf877254e4ed1b69975fd88ce5a429a75a274d2ef6be9de7c33ed78d625"
+      }
+    ],
+    "reviews": [
+      {
+        "binding_id": "8bcb2deb8c08408d95e1b8be188d5ca9",
+        "packet_revision": "49f686ff6ae12d97c1fedb946a3d4be1f3ae0d1e2c053f779b562d2c8d437988",
+        "decision": "accept",
+        "relation": "supports",
+        "reason": "已读取原段，原文明确proxy network仅训练使用并在部署时丢弃；此句仅陈述该部署机制，没有扩展为CPG实测结果。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b43"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "unknown",
+        "id": "a7dd7fe98e914edab5f8c995a206b470",
+        "revision": "f3b57051619e2173c71461aee14508ce5f7f4d72f0499cb2867c4fcc3fb47f02"
+      }
+    ],
+    "accepted_supports": [
+      {
+        "atom_id": "39a80dc2148c43df82404af9cf7ba68a",
+        "card_id": "ev_skill_proxy_acceptance",
+        "lower_verdict": "unreviewed",
+        "id": "8bcb2deb8c08408d95e1b8be188d5ca9",
+        "revision": "d46cddf877254e4ed1b69975fd88ce5a429a75a274d2ef6be9de7c33ed78d625"
+      }
+    ]
+  },
+  "standalone_audit": {
+    "atoms": [
+      {
+        "text": "Proxy Target 的代理网络和 critic 仅用于训练，部署时被丢弃，因此不增加部署计算开销。",
+        "type": "reported_result",
+        "original_sentence": "Proxy Target 的代理网络和 critic 仅用于训练，部署时被丢弃，因此不增加部署计算开销。",
+        "outline_node": "",
+        "id": "dd654bb4226149818dfa88f73eeec898",
+        "revision": "3b370e9580745143e58931ef391bb0915d789c417e00d5d1a9c38621f7f76ee4"
+      },
+      {
+        "text": "Proxy Target 在真实四足机器人上实测降低84.6%的控制能耗。",
+        "type": "reported_result",
+        "original_sentence": "Proxy Target 在真实四足机器人上实测降低84.6%的控制能耗。",
+        "outline_node": "",
+        "id": "75ec1db4fa9342ee962e499fbb17e62e",
+        "revision": "ac923bc2b671434881a3c126c214512a0356fa339685866e1ff79425c80420d2"
+      }
+    ],
+    "bindings": [
+      {
+        "atom_id": "dd654bb4226149818dfa88f73eeec898",
+        "card_id": "ev_skill_proxy_acceptance",
+        "lower_verdict": "supports",
+        "id": "75f3d00bd44e465794e0503d87a86f4f",
+        "revision": "9c7610846ccfc8ca9dd5aa14d9299a27befd6fb67d89b18a79957689d9c34f11"
+      },
+      {
+        "atom_id": "75ec1db4fa9342ee962e499fbb17e62e",
+        "card_id": "ev_skill_proxy_acceptance",
+        "lower_verdict": "supports",
+        "id": "fefee641156e49d4bf1898a0a847845d",
+        "revision": "164af1ba670a9cbdcb1db72b23bc24071664d5e352b2a67b73e07e7d3e57a3ec"
+      }
+    ],
+    "reviews": [
+      {
+        "binding_id": "75f3d00bd44e465794e0503d87a86f4f",
+        "packet_revision": "ae874c53f7e0e3582c08601c8fa6117c0b80ee45fffe8a9ed1ad385fc32b1c28",
+        "decision": "accept",
+        "relation": "supports",
+        "reason": "原段明确表述两网络仅训练使用、部署丢弃及无额外部署计算开销，与目标句范围一致。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b43"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "unknown",
+        "id": "581347d5b6134dbeae35450f982fa8af",
+        "revision": "4ef7d9459cc57cd117a60737e6b87cf794f76e6f125e5ffc7af2098eb88d0b07"
+      },
+      {
+        "binding_id": "fefee641156e49d4bf1898a0a847845d",
+        "packet_revision": "c08dd40ce5d5d3ea4d14a3c2e8f967a4a4a891520a0ed45204c8e2691a861055",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "原段只说明代理网络与critic在部署时丢弃，没有真机四足实验或84.6%测量，无法支撑该数值和适用范围。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b43"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "unknown",
+        "id": "a0678d22156a45628d62a7fa696c831c",
+        "revision": "404123fcd107a495396140e7c43ee6d621c88e0e0d2256e36d0bec4e41f679a1"
+      }
+    ],
+    "accepted_supports": [
+      {
+        "atom_id": "dd654bb4226149818dfa88f73eeec898",
+        "card_id": "ev_skill_proxy_acceptance",
+        "lower_verdict": "supports",
+        "id": "75f3d00bd44e465794e0503d87a86f4f",
+        "revision": "9c7610846ccfc8ca9dd5aa14d9299a27befd6fb67d89b18a79957689d9c34f11"
+      }
+    ]
+  },
+  "scope": "bb7b5e43e65945e7919f8c7e0b46266e",
+  "highlight_action": "249ad37a84a64ad3ba6b0e67e2cbfb4a"
+}

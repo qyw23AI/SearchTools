@@ -1,0 +1,259 @@
+{
+  "run": {
+    "scope_id": "67ea216183ed4e409b781c02c9061d00",
+    "topic": "PaperQA2真实抽取后的上层逐卡二审",
+    "parent_run_id": null,
+    "constraints": {},
+    "id": "91ae20fc8761481895e9b7108baf8eed",
+    "revision": "465909d2e7ab52455ead70518fadace3eb6a27280eeba1c891d2d77e2a73770a",
+    "kind": "run",
+    "run_id": ""
+  },
+  "audit": {
+    "atoms": [
+      {
+        "text": "Proxy Target 的代理与critic只在训练使用并在部署时丢弃。",
+        "type": "reported_result",
+        "original_sentence": "Proxy Target 的代理与critic只在训练使用并在部署时丢弃。",
+        "outline_node": "",
+        "id": "a63118336361457b82381216aa13b4dd",
+        "revision": "30bcb740bf18787e4fe2a15c43956c80cd6ec0d84760e0a3b7b93af01eb37911"
+      },
+      {
+        "text": "Proxy Target 在真实四足机器人上实测降低84.6%控制能耗。",
+        "type": "reported_result",
+        "original_sentence": "Proxy Target 在真实四足机器人上实测降低84.6%控制能耗。",
+        "outline_node": "",
+        "id": "90bb43b5604040f6ac203739ebfaaea0",
+        "revision": "f6704338029e3ba5743a4ff99201d40bbaae86e8069c540e346cfb304dccc1c7"
+      }
+    ],
+    "bindings": [
+      {
+        "atom_id": "a63118336361457b82381216aa13b4dd",
+        "card_id": "ev_d0021c730b",
+        "lower_verdict": "supports",
+        "id": "0bb96f2305104af78f7dfa8463398582",
+        "revision": "c213e182d35b8a4ac59a26e6fa5173986d51e8fa668f678e1443dc1563860e8e"
+      },
+      {
+        "atom_id": "a63118336361457b82381216aa13b4dd",
+        "card_id": "ev_c588534d6a",
+        "lower_verdict": "supports",
+        "id": "f14699ba2c324c5d9e86b33306b701ff",
+        "revision": "6041e136e88bf5c0cbc0637e20cba8d35bb0f0deb7ca67abf0097dffa4fef2c3"
+      },
+      {
+        "atom_id": "a63118336361457b82381216aa13b4dd",
+        "card_id": "ev_a6d361eaae",
+        "lower_verdict": "supports",
+        "id": "0687f0bec72549f0bbd8cb370f15bbc9",
+        "revision": "7f6065ce119a05d898c354c458e531002c504d3dbb353ac3fb2e4c3d665f3127"
+      },
+      {
+        "atom_id": "a63118336361457b82381216aa13b4dd",
+        "card_id": "ev_49123651b2",
+        "lower_verdict": "supports",
+        "id": "74580042488c4edfb7ad33cd167f4561",
+        "revision": "bf4fe7ee1108a59be88f61cb6d77cc46dd8f8b679d537e19258d39f20e408d69"
+      },
+      {
+        "atom_id": "90bb43b5604040f6ac203739ebfaaea0",
+        "card_id": "ev_d0021c730b",
+        "lower_verdict": "supports",
+        "id": "34f99498c19a478e97590a30da28e876",
+        "revision": "3b0046d855426559fca71431f1c11853f3da9c8e8eded6d6a34116c154d9a787"
+      },
+      {
+        "atom_id": "90bb43b5604040f6ac203739ebfaaea0",
+        "card_id": "ev_c588534d6a",
+        "lower_verdict": "supports",
+        "id": "93c50617200a46d092663bedbe5c1a28",
+        "revision": "740f7374c8cd3a7d42b2177b6df288dcffc3dbf3bb0b2563a957db6b7f3f5a19"
+      },
+      {
+        "atom_id": "90bb43b5604040f6ac203739ebfaaea0",
+        "card_id": "ev_a6d361eaae",
+        "lower_verdict": "supports",
+        "id": "1664cd16c2624158a3fa1da02f5846da",
+        "revision": "04cf8f0a864a07bb7beac3d5f1de898f60a2af95fb29a3b4225484bbe78ce714"
+      },
+      {
+        "atom_id": "90bb43b5604040f6ac203739ebfaaea0",
+        "card_id": "ev_49123651b2",
+        "lower_verdict": "supports",
+        "id": "d69e089d538f45f7a509866167e1d521",
+        "revision": "6ce6fcb345fe235702a0c88d4b9aa4a04c4783bd73468397a6a6a8376cb1aa04"
+      }
+    ],
+    "reviews": [
+      {
+        "binding_id": "0bb96f2305104af78f7dfa8463398582",
+        "packet_revision": "44dc63de71848685b7836c832d098e2a69ae2e31cceeee4425947ce0b6b4b4fe",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "该段证明实验环境或默认设置，无法支撑网络部署阶段的处理，不能因同一论文与高相关评分而接受。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b46"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "53e690fb11574e0fa50e842fee451297",
+        "revision": "1df5d425d9e72c892f4565313fd531f6e1c721d23ddb189044d04dbb5b3f3079"
+      },
+      {
+        "binding_id": "f14699ba2c324c5d9e86b33306b701ff",
+        "packet_revision": "a5b8a2f749d45b4f53a6d6d0e00485b10098766720189602de07d7b701e4bbb6",
+        "decision": "accept",
+        "relation": "supports",
+        "reason": "原段直接写明proxy与critic仅训练使用且在部署时丢弃，逐项对应目标机制句。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b43"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "d2eb48c4ae004c0b9f3678ffd69b83de",
+        "revision": "fef0445789eda938971d950a5e0759a45bc8fa9d7b003226163c0aae63410327"
+      },
+      {
+        "binding_id": "0687f0bec72549f0bbd8cb370f15bbc9",
+        "packet_revision": "ad4a48b69eda96e6274212f6e7bcce9e4870b985ffccf558f27d9e56ab78a682",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "该段证明实验环境或默认设置，无法支撑网络部署阶段的处理，不能因同一论文与高相关评分而接受。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p24:b0"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "915e952e63674f28bfd22dd2fe290650",
+        "revision": "8ff6774a1e7a4d979b803143fbce655826ec32e9e8f4f73e9c3a77f2d2dc0585"
+      },
+      {
+        "binding_id": "74580042488c4edfb7ad33cd167f4561",
+        "packet_revision": "e0ecda0446f1b6b5a78892cd06d42edf33926fa4d883ea7a940a05a03273b22e",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "该段仅列举仿真环境，未说明部署丢弃；跨页摘录还混入页脚24，应退回清理后再用作实验设置证据。",
+        "span_ids": [],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "9d18f37ca216406e92f3d0bba378cc7e",
+        "revision": "da8f82001b218f19c9c8be11c9f267d7f3ca1ab89db8cb7a109a4682d3b08c99"
+      },
+      {
+        "binding_id": "34f99498c19a478e97590a30da28e876",
+        "packet_revision": "1abdfb79c22267add7a8954e5ee05559900d6d7a8e9512d6964676684cf4615a",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "原文仅陈述训练/部署机制或MuJoCo仿真实验设置，没有真实四足机器人测量，也没有84.6%节能数值，文献与条件错配。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b46"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "f1f7305e534d4a8ea42c1eb536e308f4",
+        "revision": "376df0713b07ee269c8791f650f20f3d97ee6946079545aac32212c3ff90e1fd"
+      },
+      {
+        "binding_id": "93c50617200a46d092663bedbe5c1a28",
+        "packet_revision": "0a5ec779f637598f4ac73d0ceb9b2c56b8515bf874d6a53c6914cca1c360d15c",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "原文仅陈述训练/部署机制或MuJoCo仿真实验设置，没有真实四足机器人测量，也没有84.6%节能数值，文献与条件错配。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p6:b43"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "b58b5dc5191c4813b0b0353538d79c4e",
+        "revision": "5881b271b04205fcbb50b83dab18b654957983a0ffa410140561350adcb1ca2d"
+      },
+      {
+        "binding_id": "1664cd16c2624158a3fa1da02f5846da",
+        "packet_revision": "c3faa28a6256751fe367c2f9dafa13e175827a8bdc654fa975f90a7420cdef84",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "原文仅陈述训练/部署机制或MuJoCo仿真实验设置，没有真实四足机器人测量，也没有84.6%节能数值，文献与条件错配。",
+        "span_ids": [
+          "3606f3791d4f7f9d:p24:b0"
+        ],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "3647a391ea0c46b9916635875f0fc9d9",
+        "revision": "acea85701a045833dce216558ce4a761ba7d0d3cbfd42c82b63e0396f9bd83eb"
+      },
+      {
+        "binding_id": "d69e089d538f45f7a509866167e1d521",
+        "packet_revision": "71ecc24ca9740a3e1521438c4ea7449f6f32e4e01adf59f6552b64cf5fd1a5f3",
+        "decision": "reject",
+        "relation": "insufficient",
+        "reason": "原文仅陈述训练/部署机制或MuJoCo仿真实验设置，没有真实四足机器人测量，也没有84.6%节能数值，文献与条件错配。",
+        "span_ids": [],
+        "reviewer": "calling_agent",
+        "reviewer_model": "current Codex agent",
+        "id": "5969c27fb0034294a9f85051dcfea1dd",
+        "revision": "ce124bd0a3df9d122ca9c73d6b97e15ad4de38c45631673e2d26ac1272f762ab"
+      }
+    ],
+    "review_states": [
+      {
+        "binding_id": "0bb96f2305104af78f7dfa8463398582",
+        "packet_revision": "44dc63de71848685b7836c832d098e2a69ae2e31cceeee4425947ce0b6b4b4fe",
+        "review_id": "53e690fb11574e0fa50e842fee451297"
+      },
+      {
+        "binding_id": "f14699ba2c324c5d9e86b33306b701ff",
+        "packet_revision": "a5b8a2f749d45b4f53a6d6d0e00485b10098766720189602de07d7b701e4bbb6",
+        "review_id": "d2eb48c4ae004c0b9f3678ffd69b83de"
+      },
+      {
+        "binding_id": "0687f0bec72549f0bbd8cb370f15bbc9",
+        "packet_revision": "ad4a48b69eda96e6274212f6e7bcce9e4870b985ffccf558f27d9e56ab78a682",
+        "review_id": "915e952e63674f28bfd22dd2fe290650"
+      },
+      {
+        "binding_id": "74580042488c4edfb7ad33cd167f4561",
+        "packet_revision": "e0ecda0446f1b6b5a78892cd06d42edf33926fa4d883ea7a940a05a03273b22e",
+        "review_id": "9d18f37ca216406e92f3d0bba378cc7e"
+      },
+      {
+        "binding_id": "34f99498c19a478e97590a30da28e876",
+        "packet_revision": "1abdfb79c22267add7a8954e5ee05559900d6d7a8e9512d6964676684cf4615a",
+        "review_id": "f1f7305e534d4a8ea42c1eb536e308f4"
+      },
+      {
+        "binding_id": "93c50617200a46d092663bedbe5c1a28",
+        "packet_revision": "0a5ec779f637598f4ac73d0ceb9b2c56b8515bf874d6a53c6914cca1c360d15c",
+        "review_id": "b58b5dc5191c4813b0b0353538d79c4e"
+      },
+      {
+        "binding_id": "1664cd16c2624158a3fa1da02f5846da",
+        "packet_revision": "c3faa28a6256751fe367c2f9dafa13e175827a8bdc654fa975f90a7420cdef84",
+        "review_id": "3647a391ea0c46b9916635875f0fc9d9"
+      },
+      {
+        "binding_id": "d69e089d538f45f7a509866167e1d521",
+        "packet_revision": "71ecc24ca9740a3e1521438c4ea7449f6f32e4e01adf59f6552b64cf5fd1a5f3",
+        "review_id": "5969c27fb0034294a9f85051dcfea1dd"
+      }
+    ],
+    "accepted_supports": [
+      {
+        "atom_id": "a63118336361457b82381216aa13b4dd",
+        "card_id": "ev_c588534d6a",
+        "lower_verdict": "supports",
+        "id": "f14699ba2c324c5d9e86b33306b701ff",
+        "revision": "6041e136e88bf5c0cbc0637e20cba8d35bb0f0deb7ca67abf0097dffa4fef2c3"
+      }
+    ]
+  },
+  "highlight": {
+    "id": "55644df2195e45c9854bb7d98eea8aed",
+    "status": "failed",
+    "error": "Error: 阅读器未确认目标页渲染或批注加载 · {\"bridge_version\":\"1.2.5\",\"attachment_key\":\"QF757IAF\",\"page_index\":6,\"annotation_key\":\"B9HYTSN6\",\"annotation_in_reader\":true,\"page_rendered\":false,\"selected_annotation\":true}",
+    "result": {
+      "bridge_version": "1.2.5"
+    }
+  }
+}
