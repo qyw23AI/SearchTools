@@ -14,11 +14,13 @@ var chromeHandle = null;
 var sectionRefreshCallback = null;
 var pollBusy = false;
 var observedCardsRevision = null;
+var evidencePanels = new Map();
+var panelRenderSequence = new WeakMap();
 var lastSelectionPopup = null;
 var lastCapture = null;
 
 const SEARCHTOOLS_HOST = 'http://127.0.0.1:8765';
-const BRIDGE_VERSION = '1.2.7';
+const BRIDGE_VERSION = '1.2.8';
 const ADDON_ID = 'evidence-bridge@searchtools.org';
 const PANE_ID = 'evidence-bridge-itempane-section';
 
@@ -115,7 +117,7 @@ function escapeHtml(str) {
 
 async function httpGet(url) {
   if (typeof fetch !== 'undefined') {
-    let res = await fetch(url);
+    let res = await fetch(url, {cache:'no-store'});
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   }
@@ -604,8 +606,17 @@ function renderEvidenceSectionSync(doc, body, item) {
   body.appendChild(container);
 }
 
+async function refreshEvidencePanels() {
+  for (let [body, context] of evidencePanels) {
+    if (!body.isConnected) { evidencePanels.delete(body); continue; }
+    await renderEvidenceSectionAsync(context.doc, body, context.item, context.setSectionSummary);
+  }
+}
+
 // ItemPane Section Asynchronous Render
 async function renderEvidenceSectionAsync(doc, body, item, setSectionSummary) {
+  const sequence = (panelRenderSequence.get(body) || 0) + 1;
+  panelRenderSequence.set(body, sequence);
   let listContainer = body.querySelector('#evidence-bridge-cards-list');
   let titleBadge = body.querySelector('#evidence-bridge-title-badge');
   if (!listContainer) return;
@@ -628,8 +639,10 @@ async function renderEvidenceSectionAsync(doc, body, item, setSectionSummary) {
   let cards = [];
   try {
     let data = await httpGet(`${SEARCHTOOLS_HOST}/api/evidence-cards/by-item?item=${encodeURIComponent(zotKey)}`);
+    if (panelRenderSequence.get(body) !== sequence || !listContainer.isConnected) return;
     cards = (data && data.cards) || [];
   } catch (err) {
+    if (panelRenderSequence.get(body) !== sequence || !listContainer.isConnected) return;
     listContainer.innerHTML = `
       <div style="padding: 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; color: #991b1b; text-align: center; font-size: 11.5px;">
         ⚠️ 无法连接至 SearchTools 服务<br>
@@ -892,20 +905,23 @@ function registerItemPaneSection(rootURI) {
       },
       onInit: ({ paneID, doc, body, refresh }) => {
         log(`ItemPane section initialized: ${paneID}`);
-        sectionRefreshCallback = refresh;
+        sectionRefreshCallback = refreshEvidencePanels;
       },
       onDestroy: ({ paneID }) => {
         log(`ItemPane section destroyed: ${paneID}`);
-        sectionRefreshCallback = null;
+        // Other item panes may still be alive; prune detached bodies on refresh.
       },
       onItemChange: ({ item, setEnabled }) => {
         let enabled = !!(item && (item.isRegularItem ? item.isRegularItem() : true));
         setEnabled(enabled);
       },
       onRender: ({ doc, body, item }) => {
+        panelRenderSequence.set(body, (panelRenderSequence.get(body) || 0) + 1);
+        evidencePanels.set(body, {doc, item});
         renderEvidenceSectionSync(doc, body, item);
       },
       onAsyncRender: async ({ doc, body, item, setSectionSummary }) => {
+        evidencePanels.set(body, {doc, item, setSectionSummary});
         await renderEvidenceSectionAsync(doc, body, item, setSectionSummary);
       }
     });
@@ -990,14 +1006,16 @@ function startActionPoller() {
     try {
       let data = await httpGet(`${SEARCHTOOLS_HOST}/api/zotero/actions`);
       if (data.cards_revision != null && data.cards_revision !== observedCardsRevision) {
+        await refreshEvidencePanels();
         observedCardsRevision = data.cards_revision;
-        if (sectionRefreshCallback) sectionRefreshCallback();
       }
       for (let action of data.actions || []) {
         try {
           let result;
           if (action.action === 'open_card' && action.card_id) {
             result = action.locate ? await highlightAndOpenCard(action.locate) : await handleCardOpen(action.card_id);
+          } else if (action.action === 'inspect_panels') {
+            result = {bridge_version:BRIDGE_VERSION, panels:[...evidencePanels].filter(([body])=>body.isConnected).map(([body,context])=>({item_key:context.item?.key, title:body.querySelector('#evidence-bridge-title-badge')?.textContent, cards:[...body.querySelectorAll('.evidence-card-box')].map(el=>el.querySelector('span')?.textContent)}))};
           } else if (action.action === 'acceptance_capture') {
             result = await acceptanceCapture(action);
           } else if (action.action === 'delete_card' && action.card_id) {
@@ -1313,6 +1331,7 @@ async function startup(data, reason) {
 function shutdown(data, reason) {
   log('Shutting down SearchTools Evidence Bridge...');
   stopActionPoller();
+  evidencePanels.clear();
   Zotero?.Reader?._unregisterEventListenerByPluginID?.(ADDON_ID);
   unregisterItemPaneSection();
 

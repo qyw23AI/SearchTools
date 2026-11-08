@@ -1,0 +1,85 @@
+{
+  "before": {
+    "bridge_version": "1.2.8",
+    "panels": [
+      {
+        "item_key": "R56N7SXB",
+        "title": "🔬 实证卡 (9)",
+        "cards": [
+          "ev_53db4ae127",
+          "ev_e1279ef5fa",
+          "ev_c588534d6a",
+          "ev_8dfe928f2b",
+          "ev_70b6207d9e",
+          "ev_49123651b2",
+          "ev_a6d361eaae",
+          "ev_01c2e5df2f",
+          "ev_skill_proxy_acceptance"
+        ]
+      },
+      {
+        "title": "🔬 实证卡库",
+        "cards": []
+      }
+    ]
+  },
+  "after_add": {
+    "bridge_version": "1.2.8",
+    "panels": [
+      {
+        "item_key": "R56N7SXB",
+        "title": "🔬 实证卡 (10)",
+        "cards": [
+          "ev_53db4ae127",
+          "ev_e1279ef5fa",
+          "ev_c588534d6a",
+          "ev_8dfe928f2b",
+          "ev_70b6207d9e",
+          "ev_49123651b2",
+          "ev_a6d361eaae",
+          "ev_01c2e5df2f",
+          "ev_skill_proxy_acceptance",
+          "ev_panel_refresh_ed7e57c1"
+        ]
+      },
+      {
+        "title": "🔬 实证卡库",
+        "cards": []
+      }
+    ]
+  },
+  "after_delete": {
+    "bridge_version": "1.2.8",
+    "panels": [
+      {
+        "item_key": "R56N7SXB",
+        "title": "🔬 实证卡 (9)",
+        "cards": [
+          "ev_53db4ae127",
+          "ev_e1279ef5fa",
+          "ev_c588534d6a",
+          "ev_8dfe928f2b",
+          "ev_70b6207d9e",
+          "ev_49123651b2",
+          "ev_a6d361eaae",
+          "ev_01c2e5df2f",
+          "ev_skill_proxy_acceptance"
+        ]
+      },
+      {
+        "title": "🔬 实证卡库",
+        "cards": []
+      }
+    ]
+  },
+  "backend_count": 9,
+  "deleted_test_card": "ev_panel_refresh_ed7e57c1",
+  "deletion": {
+    "ok": true,
+    "id": "ev_panel_refresh_ed7e57c1",
+    "project": "7daaf16850c24c849e8e5adffb242dad",
+    "already_deleted": false,
+    "cards_revision": "12"
+  },
+  "residual_test_cards": false
+}
