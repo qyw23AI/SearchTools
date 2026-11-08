@@ -144,9 +144,12 @@ PROVIDERS = {
 DEEPTUTOR_DIR = Path(os.environ.get('DEEPTUTOR_DIR', '/home/qyw/DeepTutor'))
 
 
-def sync_model_from_deeptutor(deeptutor_dir=None):
-    """Inspect DeepTutor's data/user/settings/model_catalog.json and chat_history.db to
-    return a synthesized catalog data structure that PaperQA2 / LiteLLM immediately executes."""
+def sync_model_from_deeptutor(deeptutor_dir=None, selection=None):
+    """Resolve a validated session event (or explicit selection) against DeepTutor settings.
+
+    Without an event, only the global default is available; it is labeled as such.
+    No database timestamp or legacy live-file heuristic determines a current session.
+    """
     dt_dir = Path(deeptutor_dir or DEEPTUTOR_DIR).expanduser()
     p = dt_dir / 'data/user/settings/model_catalog.json'
     if not p.exists():
@@ -161,68 +164,25 @@ def sync_model_from_deeptutor(deeptutor_dir=None):
 
     # 1. Resolve LLM:
     # DeepTutor stores the global active model in data/user/settings/model_catalog.json (services.llm).
-    # We also check all chat_history.db files (root + per-workspace) and LIVE_SYNC_FILE,
-    # picking whichever model selection was updated most recently.
+    # Current-session overrides are explicit events, not inferred from file times.
     s_llm = data.get('services', {}).get('llm', {})
     target_pid = s_llm.get('active_profile_id')
     target_mid = s_llm.get('active_model_id')
 
-    latest_ts = p.stat().st_mtime if p.exists() else 0
-
-    # Check all chat_history.db files (root data/user/chat_history.db and workspaces/ws_*/.deeptutor/data/user/chat_history.db)
-    db_files = [dt_dir / 'data/user/chat_history.db']
-    ws_root = dt_dir / 'data/user/workspaces'
-    if ws_root.is_dir():
-        db_files.extend(ws_root.glob('*/.deeptutor/data/user/chat_history.db'))
-
-    import sqlite3
-    for db_file in db_files:
-        if not db_file.exists():
-            continue
-        try:
-            c = sqlite3.connect(str(db_file), timeout=2)
-            rows = c.execute(
-                "SELECT updated_at, preferences_json FROM sessions WHERE deleted_at IS NULL AND preferences_json IS NOT NULL ORDER BY updated_at DESC LIMIT 5"
-            ).fetchall()
-            c.close()
-            for r_ts, r_prefs in rows:
-                session_updated = float(r_ts or 0)
-                if session_updated > latest_ts and r_prefs:
-                    prefs = json.loads(r_prefs)
-                    llm_sel = prefs.get('llm_selection') or {}
-                    if llm_sel.get('profile_id') and llm_sel.get('model_id'):
-                        latest_ts = session_updated
-                        target_pid = llm_sel['profile_id']
-                        target_mid = llm_sel['model_id']
-                        break
-        except Exception:
-            pass
-
-    # Check LIVE_SYNC_FILE reported by DeepTutor UI / companion script (only when using default DEEPTUTOR_DIR)
-    if deeptutor_dir is None and LIVE_SYNC_FILE.exists():
-        try:
-            live = json.loads(LIVE_SYNC_FILE.read_text(encoding='utf-8'))
-            live_ts = float(live.get('updated_at') or 0)
-            if live_ts >= latest_ts - 1.0 and live.get('profile_id') and live.get('model_id'):
-                latest_ts = live_ts
-                target_pid = live['profile_id']
-                target_mid = live['model_id']
-        except Exception:
-            pass
-
-    prof = next((x for x in s_llm.get('profiles', []) if x.get('id') == target_pid), None)
-    m = next((x for x in (prof.get('models') if prof else []) if x.get('id') == target_mid), None)
-
-    # Fallback to catalog defaults if target profile or model was not found
+    # Session events are the authoritative source. No chat-history scans or mtime
+    # guessing: an explicit request selection is always pinned and validated.
+    selected_state = None
+    if selection is None and dt_dir.resolve() == DEEPTUTOR_DIR.expanduser().resolve():
+        from .model_events import read_selection
+        selected_state = read_selection()
+        if selected_state:
+            selection = selected_state['selection']
+    if selection is not None:
+        target_pid, target_mid = selection.get('profile_id'), selection.get('model_id')
+    prof = next((profile for profile in s_llm.get('profiles', []) if profile.get('id') == target_pid), None)
+    m = next((model for model in (prof.get('models', []) if prof else []) if model.get('id') == target_mid), None)
     if not prof or not m:
-        target_pid = s_llm.get('active_profile_id')
-        target_mid = s_llm.get('active_model_id')
-        prof = next((x for x in s_llm.get('profiles', []) if x.get('id') == target_pid), None)
-        m = next((x for x in (prof.get('models') if prof else []) if x.get('id') == target_mid), None)
-    if not prof and s_llm.get('profiles'):
-        prof = next((x for x in s_llm['profiles'] if x.get('models')), s_llm['profiles'][0])
-    if prof and not m and prof.get('models'):
-        m = prof['models'][0]
+        raise ValueError('DeepTutor 选中的 profile/model 已失效，拒绝退回其他模型')
 
     binding = (prof.get('binding') if prof else 'ollama') or 'ollama'
     raw_model = (m.get('model') if m else 'qwen3:8b') or 'qwen3:8b'
@@ -252,29 +212,22 @@ def sync_model_from_deeptutor(deeptutor_dir=None):
         'openai': 'openai',
         'anthropic': 'anthropic',
         'openrouter': 'openrouter',
+        'openai_codex': 'openai',
     }
     llm_provider = provider_map.get(binding, 'openai')
 
-    # If active profile has no direct API key (e.g. openai_codex OAuth), fallback to available cloud key or local ollama
+    gateway_selection = None
+    if binding == 'openai_codex':
+        key_file = LIVE_SYNC_FILE.with_name('deeptutor_gateway.key')
+        if not key_file.is_file():
+            raise ValueError('DeepTutor 登录模型适配器尚未安装')
+        api_key = key_file.read_text().strip()  # Local adapter credential, never an OAuth token.
+        base_url = 'http://127.0.0.1:8001/api/evidence-llm/v1'
+        gateway_selection = {'profile_id': target_pid, 'model_id': target_mid}
+        if selection and selection.get('reasoning_effort'):
+            gateway_selection['reasoning_effort'] = selection['reasoning_effort']
     if PROVIDERS.get(llm_provider, {}).get('needs_key') and not api_key:
-        if 'gemini' in conns_by_provider and conns_by_provider['gemini'].get('api_key'):
-            llm_provider = 'gemini'
-            model_name = 'gemini-2.5-flash'
-            api_key = conns_by_provider['gemini'].get('api_key')
-            base_url = ''
-            binding = 'gemini'
-        elif 'deepseek' in conns_by_provider and conns_by_provider['deepseek'].get('api_key'):
-            llm_provider = 'deepseek'
-            model_name = 'deepseek-chat'
-            api_key = conns_by_provider['deepseek'].get('api_key')
-            base_url = 'https://api.deepseek.com'
-            binding = 'deepseek'
-        else:
-            llm_provider = 'ollama'
-            model_name = 'qwen3:8b'
-            base_url = 'http://127.0.0.1:11434'
-            api_key = ''
-            binding = 'ollama'
+        raise ValueError(f'DeepTutor 当前模型 {binding}/{model_name} 缺少可用于 PaperQA2 的 API 授权')
 
     # Resolve Embedding
     s_emb = data.get('services', {}).get('embedding', {})
@@ -313,6 +266,7 @@ def sync_model_from_deeptutor(deeptutor_dir=None):
         {
             'id': cid_llm,
             'name': f'DeepTutor ({binding.upper()})',
+            'gateway_selection': gateway_selection,
             'provider': llm_provider,
             'base_url': base_url,
             'api_key': api_key,
@@ -341,6 +295,8 @@ def sync_model_from_deeptutor(deeptutor_dir=None):
         'index': dict(DEFAULT_INDEX),
         'deeptutor_info': {
             'llm_binding': binding,
+            'selection_source': 'session_event' if selection else 'global_default',
+            'profile_id': target_pid, 'model_id': target_mid,
             'llm_model': model_name,
             'llm_provider': llm_provider,
             'llm_base_url': base_url,
@@ -630,6 +586,11 @@ def litellm_params(conn, model, params, service='llm'):
         out['api_base'] = conn['base_url']
     if conn.get('api_key'):
         out['api_key'] = conn['api_key']
+    if conn.get('gateway_selection'):
+        out['extra_headers'] = {'X-DeepTutor-Selection': json.dumps(conn['gateway_selection'])}
+        # DeepTutor's Responses provider owns supported generation controls.
+        # PaperQA2/LMI otherwise injects temperature=0, rejected by GPT-5 routing.
+        out['drop_params'] = True
     if service != 'embedding':
         out['temperature'] = params.get('temperature', 0.0)
         if conn['provider'] == 'ollama':
@@ -680,12 +641,12 @@ def build_paperqa_settings(data, options=None):
     mode = options.get('mode') or data.get('mode', 'deeptutor')
     if mode == 'deeptutor' or options.get('use_deeptutor_model') or data.get('use_deeptutor_model'):
         try:
-            dt_data = sync_model_from_deeptutor()
+            dt_data = sync_model_from_deeptutor(selection=options.get('deeptutor_selection'))
             dt_data['params'] = {**data.get('params', {}), **(dt_data.get('params') or {})}
             dt_data['index'] = {**data.get('index', {}), **(dt_data.get('index') or {})}
             data = dt_data
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ValueError('DeepTutor 模型同步失败，任务未切换到其他模型') from exc
     params = data['params']
     preset = PRESETS.get(options.get('preset') or params['preset'], PRESETS['balanced'])
     llm_conn, llm_model = resolve(data, 'llm')

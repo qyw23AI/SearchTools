@@ -3,6 +3,58 @@
  */
 (function () {
   const TOKEN = window.__SEARCHTOOLS_TOKEN__ || 'local-mcp';
+  const modelClientId = new URLSearchParams(location.search).get('client_id');
+  let confirmedModel = null;
+  const modelContextRequests = new Map();
+  function showModelState(state) {
+    confirmedModel = state?.status === 'ready' ? state : null;
+    const label = document.getElementById('wb-model-label');
+    if (!label) return;
+    label.textContent = confirmedModel?.model.llm_model || '等待当前会话模型';
+    label.title = confirmedModel ? '已确认 DeepTutor 当前会话模型' : '请从 DeepTutor 打开工作台';
+    label.dataset.syncRevision = state?.revision || '';
+    label.dataset.syncElapsedMs = String(state?.client_elapsed_ms || '');
+  }
+  function modelContext() {
+    if (window.parent === window) {
+      if (!confirmedModel) return Promise.reject(new Error('当前会话模型尚未同步'));
+      return Promise.resolve(confirmedModel);
+    }
+    return new Promise((resolve, reject) => {
+      const request_id = crypto.randomUUID();
+      const timer = setTimeout(() => {modelContextRequests.delete(request_id); reject(new Error('等待模型同步确认超时'));}, 15000);
+      modelContextRequests.set(request_id, {resolve,reject,timer});
+      window.parent.postMessage({type:'st-model-context-request',request_id}, '*');
+    });
+  }
+  window.addEventListener('message', event => {
+    if (event.source !== window.parent || !['http://127.0.0.1:3782','http://localhost:3782'].includes(event.origin)) return;
+    const data = event.data || {};
+    if (data.type === 'st-model-confirmed') showModelState(data.state);
+    if (data.type === 'st-model-pending') {
+      const label = document.getElementById('wb-model-label');
+      if (label) label.textContent = '正在确认模型…';
+    }
+    if (data.type === 'st-model-error') {
+      confirmedModel = null;
+      const label = document.getElementById('wb-model-label');
+      if (label) {label.textContent='模型同步失败';label.title=data.error;}
+    }
+    if (data.type === 'st-model-context-response') {
+      const pending = modelContextRequests.get(data.request_id);
+      if (!pending) return;
+      clearTimeout(pending.timer);modelContextRequests.delete(data.request_id);
+      if (data.error) pending.reject(new Error(data.error));
+      else {showModelState(data.state);pending.resolve(data.state);}
+    }
+  });
+  const modelEvents = new EventSource('/api/deeptutor/model-events' + (modelClientId ? '?client_id='+encodeURIComponent(modelClientId) : ''));
+  modelEvents.onmessage = event => showModelState(JSON.parse(event.data));
+  modelEvents.onerror = () => {
+    const label = document.getElementById('wb-model-label');
+    if (label) label.title = '同步连接中断，正在重连；新任务仍需要模型确认';
+  };
+
   let currentScopeId = '';
   let scopesList = [];
   let selectedCardIds = new Set();
@@ -64,6 +116,13 @@
   }
 
   async function api(path, options = {}) {
+    if (path === '/api/jobs' && options.method === 'POST') {
+      const state = await modelContext();
+      const body = JSON.parse(options.body);
+      body.options = {...body.options, model_client_id:state.client_id, model_sync_revision:state.revision};
+      options = {...options, body:JSON.stringify(body)};
+    }
+
     const res = await fetch(path, {
       ...options,
       headers: {
@@ -199,9 +258,7 @@
         zotEl.innerHTML = `<i class="dot err"></i> Zotero 离线`;
       }
 
-      const modLabel = document.getElementById('wb-model-label');
-      const syncInfo = (dtSt && dtSt.model_sync) || {};
-      modLabel.textContent = syncInfo.llm_model ? `${syncInfo.llm_model}` : '已同步模型';
+      if (confirmedModel) showModelState(confirmedModel);
     } catch (e) {
       console.warn('loadHeaderStatus error:', e);
     }
@@ -476,15 +533,19 @@
                 <input type="checkbox" class="wb-card-check" data-id="${esc(c.id)}" ${checked} style="margin-top:3px;">
                 <span class="wb-card-title">${esc(src.title || c.title)}</span>
               </label>
-              <span class="wb-badge ${badgeCls}">${score}/10</span>
+              <span class="wb-badge ${badgeCls}" title="检索相关性，不代表论点正确概率">相关性 ${score}/10</span>
             </div>
             <div class="wb-card-meta">
               <code>${esc(c.id)}</code> · ${esc(authors)} (${esc(src.year || 'n.d.')})${esc(pg)} · citekey: <code>${esc(src.citekey || '')}</code>
               ${c.locate && c.locate.status === 'exact' ? ` · <span class="wb-badge ok" title="已精确检索到原文段落与高亮区域">🎯 精确定位 p.${esc(c.locate.page_label)}</span>` : (c.locate && c.locate.status === 'page_only' ? ` · <span class="wb-badge warn" title="已定位到对应页码">📄 页面定位 p.${esc(c.locate.page_label)}</span>` : '')}
               ${usedCnt > 0 ? ` · <span class="wb-badge ok">已引用 ${usedCnt} 次</span>` : ''}
             </div>
-            <div class="wb-summary"><strong>要点：</strong>${esc(c.summary)}</div>
-            <div class="wb-quote">“${esc((c.quote || '').slice(0, 360))}”</div>
+            <div class="wb-summary"><strong>论点：</strong>${esc(c.claim || '待明确论点')}</div>
+            <div class="wb-card-meta">${c.provenance && c.provenance.version === 3 ? '模型抽取 · 论点仍需复核' : '旧卡或手工摘录 · 需复核论点与出处'}</div>
+            <div class="wb-summary"><strong>解释：</strong>${esc(c.summary)}</div>
+            ${c.provenance && c.provenance.limitation ? `<div class="wb-summary"><strong>适用限制：</strong>${esc(c.provenance.limitation)}</div>` : ''}
+            ${c.locate && c.locate.spans && c.locate.spans.length ? `<details><summary>核查原文段落（${c.locate.spans.length} 段）</summary>${c.locate.spans.map(span => `<div class="wb-quote"><code>${esc(span.paragraph_id)}</code> · p.${esc(span.page_label)}<br>${esc(span.paragraph_text)}</div>`).join('')}</details>` : ''}
+            <div class="wb-quote">“${esc(c.quote || '')}”</div>
             <div class="wb-btn-group" style="margin-top:8px;">
               <button class="wb-btn wb-btn-primary wb-btn-xs" data-cite-one="${esc(c.id)}">插入引用</button>
               <button class="wb-btn wb-btn-secondary wb-btn-xs" data-prompt-one="${esc(c.id)}">插入证据块</button>
@@ -539,11 +600,23 @@
             body: JSON.stringify({ uri, card_id: cid }),
           });
           if (res && res.ok) {
-            showToast('已在 Zotero 中定位原文与对应页面');
-            return;
+            if (!res.action_id) throw new Error('缺少 Zotero 动作回执编号');
+            showToast('请求已发送，等待 Zotero 确认...');
+            for (let attempt = 0; attempt < 30; attempt++) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              const ack = await api('/api/zotero/action-status?id=' + encodeURIComponent(res.action_id));
+              if (ack.status === 'failed') throw new Error(ack.error || 'Zotero 定位失败');
+              if (ack.status === 'done') {
+                showToast('Zotero 已确认打开并创建段落高亮');
+                return;
+              }
+            }
+            throw new Error('尚未收到 Zotero 回执，请确认 Evidence Bridge 插件在线');
           }
+          throw new Error((res && res.error) || '无法定位完整引文');
         } catch (err) {
-          console.warn('Backend /api/open-zotero invocation failed, trying client navigation', err);
+          showToast('定位未完成：' + (err.message || err));
+          return;
         }
         if (uri) {
           window.location.href = uri;
@@ -961,5 +1034,6 @@
   refreshAll().then(() => {
     connectEventStream();
     setInterval(checkZoteroPluginStatus, 3000);
+
   });
 })();

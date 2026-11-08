@@ -12,8 +12,12 @@ var Zotero;
 var pollIntervalId = null;
 var chromeHandle = null;
 var sectionRefreshCallback = null;
+var pollBusy = false;
+var lastSelectionPopup = null;
+var lastCapture = null;
 
 const SEARCHTOOLS_HOST = 'http://127.0.0.1:8765';
+const BRIDGE_VERSION = '1.2.2';
 const ADDON_ID = 'evidence-bridge@searchtools.org';
 const PANE_ID = 'evidence-bridge-itempane-section';
 
@@ -129,7 +133,9 @@ async function httpPost(url, payload) {
       headers: headers,
       body: JSON.stringify(payload)
     });
-    return await res.json();
+    let data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
   }
   let res = await Zotero.HTTP.request('POST', url, {
     headers: headers,
@@ -144,16 +150,68 @@ async function handleCardOpen(cardId) {
     log(`Handling card open request for: ${cardId}`);
     let url = `${SEARCHTOOLS_HOST}/api/evidence-cards/locate?id=${encodeURIComponent(cardId)}`;
     let data = await httpGet(url);
-    await highlightAndOpenCard(data);
+    return await highlightAndOpenCard(data);
   } catch (e) {
     log(`Error in handleCardOpen: ${e}`);
     if (typeof Zotero !== 'undefined' && Zotero.logError) {
       Zotero.logError(e);
     }
+    throw e;
   }
 }
 
+async function waitForValue(check, message, timeout = 15000) {
+  let deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    let value = check();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(message);
+}
+
+async function getReadyReader(attachment) {
+  let reader = await waitForValue(
+    () => Zotero.Reader._readers.find(r => r.itemID === attachment.id && r._internalReader),
+    'Zotero 阅读器未能初始化');
+  let timer;
+  try {
+    await Promise.race([reader._initPromise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('阅读器初始化超时')), 15000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+  return reader;
+}
+
+function inspectReader(reader, annotationKey) {
+  let internal = reader._internalReader;
+  let view = internal?._primaryView;
+  let pdfWindow = view?._iframeWindow;
+  let app = (pdfWindow?.wrappedJSObject || pdfWindow)?.PDFViewerApplication;
+  let pageNumber = app?.pdfViewer?.currentPageNumber;
+  let pageIndex = Number.isInteger(pageNumber) ? pageNumber - 1 : internal?._state?.primaryViewState?.pageIndex;
+  let annotation = internal?._state?.annotations?.find(a => a.id === annotationKey);
+  let pageView = Number.isInteger(pageIndex) ? app?.pdfViewer?.getPageView(pageIndex) : null;
+  return {bridge_version: BRIDGE_VERSION, attachment_key: reader._item.key,
+    page_index: pageIndex, annotation_key: annotationKey,
+    annotation_in_reader: !!annotation, page_rendered: pageView?.renderingState === 3,
+    selected_annotation: internal?._state?.selectedAnnotationIDs?.includes(annotationKey) || false};
+}
+
 async function highlightAndOpenCard(cardData) {
+  if (!cardData || cardData.status !== 'exact') {
+    throw new Error('完整引文未通过唯一出处验证，拒绝生成高亮');
+  }
+  if (cardData.spans && cardData.spans.length > 1) {
+    let results = [];
+    for (let i = cardData.spans.length - 1; i >= 0; i--) {
+      results.push(await highlightAndOpenCard({ ...cardData, ...cardData.spans[i], spans: null,
+        card_id: (cardData.card_id || cardData.id) + '-span-' + i }));
+    }
+    return {bridge_version: BRIDGE_VERSION, spans: results};
+  }
   if (!cardData) return;
   let cardId = cardData.card_id || cardData.id;
   if (!cardId) return;
@@ -167,7 +225,7 @@ async function highlightAndOpenCard(cardData) {
   if (attKey) {
     attachment = await Zotero.Items.getByLibraryAndKeyAsync(userLibraryID, attKey);
   }
-  if (!attachment && zotKey) {
+  if (!attKey && !attachment && zotKey) {
     let parentItem = await Zotero.Items.getByLibraryAndKeyAsync(userLibraryID, zotKey);
     if (parentItem) {
       let attIds = parentItem.getAttachments();
@@ -180,7 +238,7 @@ async function highlightAndOpenCard(cardData) {
   if (!attachment || !attachment.isFileAttachment()) {
     log(`Attachment item not found for card ${cardId} (att: ${attKey}, zot: ${zotKey})`);
     showToast('⚠️ 未找到 PDF 附件', `卡片 ${cardId} 关联的附件不存在`);
-    return;
+    throw new Error('PDF attachment not found');
   }
 
   let pageIndex = parseInt(cardData.page_index != null ? cardData.page_index : 0);
@@ -203,20 +261,20 @@ async function highlightAndOpenCard(cardData) {
     }
   }
 
-  if (!targetAnnot && rects.length > 0) {
+  if (rects.length > 0) {
     try {
       let firstRect = rects[0] || [0, 0, 0, 0];
       let sortIndex = String(pageIndex).padStart(5, '0') + '|' +
         String(Math.max(0, Math.round(1000 - (firstRect[1] || 0)))).padStart(6, '0') + '|' +
         String(Math.max(0, Math.round(firstRect[0] || 0))).padStart(5, '0');
 
-      targetAnnot = new Zotero.Item('annotation');
+      targetAnnot = targetAnnot || new Zotero.Item('annotation');
       targetAnnot.libraryID = attachment.libraryID;
       targetAnnot.parentID = attachment.id;
       targetAnnot.annotationType = 'highlight';
       targetAnnot.annotationText = cardData.quote || '';
       targetAnnot.annotationComment =
-        `【论证支撑证据卡 ${cardId}】\n要点：${cardData.summary || ''}\n置信度评分：${cardData.score || 8.5}/10`;
+        `【论证支撑证据卡 ${cardId}】\n要点：${cardData.summary || ''}\n检索相关性：${cardData.score || 0}/10`;
       targetAnnot.annotationColor = '#ffd400'; // Gold yellow
       targetAnnot.annotationPageLabel = pageLabel;
       targetAnnot.annotationSortIndex = sortIndex;
@@ -232,6 +290,7 @@ async function highlightAndOpenCard(cardData) {
       log(`Created temporary evidence highlight annotation: ${targetAnnot.key}`);
     } catch (err) {
       log(`Could not create annotation: ${err}`);
+      throw err;
     }
   }
 
@@ -244,6 +303,22 @@ async function highlightAndOpenCard(cardData) {
 
   log(`Opening file attachment ${attachment.key} (id: ${attachment.id}) at pageIndex ${pageIndex}, annot: ${location.annotationID || 'none'}`);
   await Zotero.Reader.open(attachment.id, location);
+  let reader = await getReadyReader(attachment);
+  if (!targetAnnot) throw new Error('没有可显示的已验证高亮');
+  // Reader.setAnnotations accepts Zotero.Item objects, not reader JSON.
+  await reader.setAnnotations([targetAnnot]);
+  await reader.navigate(location);
+  let receipt = await waitForValue(() => {
+    let state = inspectReader(reader, targetAnnot.key);
+    return state.page_index === pageIndex && state.annotation_in_reader && state.page_rendered ? state : null;
+  }, '阅读器未确认目标页渲染或批注加载');
+  // Prefer the running reader's own sort-index algorithm over guessed PDF height.
+  let nativeMeta = reader._internalReader._primaryView.getAnnotationMeta?.(Components.utils.cloneInto({pageIndex, rects}, reader._iframeWindow));
+  if (nativeMeta?.sortIndex && targetAnnot.annotationSortIndex !== nativeMeta.sortIndex) {
+    targetAnnot.annotationSortIndex = nativeMeta.sortIndex;
+    await targetAnnot.saveTx();
+  }
+  log('Reader verified: ' + JSON.stringify(receipt));
 
   showToast('🎯 论据定位完成', `第 ${pageLabel} 页 · ${cardId}`);
 
@@ -251,6 +326,7 @@ async function highlightAndOpenCard(cardData) {
   if (win && win.focus) {
     win.focus();
   }
+  return receipt;
 }
 
 async function cleanupTempAnnotations() {
@@ -324,7 +400,7 @@ async function createChildNoteForItem(parentItem, card, bibEntry) {
     <blockquote style="margin: 6px 0 6px 12px; border-left: 3px solid #f59e0b; padding-left: 8px; color: #475569; font-style: italic;">
       ${escapeHtml(quoteStr)}
     </blockquote>
-    <p><strong>📍 出处页码：</strong>第 ${escapeHtml(pageStr)} 页 | <strong>置信度评分：</strong>${escapeHtml(scoreStr)}</p>
+    <p><strong>📍 出处页码：</strong>第 ${escapeHtml(pageStr)} 页 | <strong>检索相关性：</strong>${escapeHtml(scoreStr)}</p>
     ${bibEntry ? `<p><strong>📚 GB/T 7714 规范引用：</strong><br>${escapeHtml(bibEntry)}</p>` : ''}
     <p><a href="zotero://evidence/open?card=${encodeURIComponent(cardId)}">👉 点击在 Zotero 阅读器中跳转并高亮该论据</a></p>
   `;
@@ -392,55 +468,37 @@ async function batchCopyCitations(cards) {
   }
 }
 
-async function createCardFromSelection(reader, selectedText, pageIndex) {
+async function createCardFromSelection(reader, annotation, claim = '', options = {}) {
+  let requestId = options.request_id || Services.uuid.generateUUID().toString();
   try {
-    let text = (selectedText || (reader.getSelectedText && reader.getSelectedText()) || '').trim();
-    if (!text) {
-      return;
-    }
+    let text = String(annotation?.text || '').trim();
+    if (!text || !annotation?.position?.rects?.length) throw new Error('缺少真实阅读器选文或坐标');
     let attachment = reader._item || reader.item;
-    let parentItem = null;
-    if (attachment && attachment.parentID) {
-      parentItem = await Zotero.Items.getAsync(parseInt(attachment.parentID));
-    }
-    let pIdx = pageIndex != null ? pageIndex : (reader._internalReader?.pageIndex || 0);
-    let pageLabel = String(pIdx + 1);
-
-    let creators = [];
-    if (parentItem) {
-      try {
-        creators = parentItem.getCreators().map(c => `${c.firstName || ''} ${c.lastName || ''}`.trim());
-      } catch (ex) {}
-    }
-
+    let parentItem = attachment?.parentID ? await Zotero.Items.getAsync(attachment.parentID) : null;
+    if (!parentItem) throw new Error('选文附件没有对应的文献条目');
     let payload = {
-      zotero_key: parentItem ? parentItem.key : '',
-      attachment_key: attachment ? attachment.key : '',
-      quote: text,
-      page_index: pIdx,
-      page_label: pageLabel,
-      title: parentItem ? parentItem.getField('title') : (attachment ? attachment.getField('title') : 'Zotero 选文批注'),
-      authors: JSON.stringify(creators),
-      year: parentItem ? String(parentItem.getField('year') || '') : '',
-      score: 8.5,
-      claim: '从 Zotero 阅读器划选创建'
+      zotero_key: parentItem.key, attachment_key: attachment.key,
+      quote: text, claim: claim.trim(), project: options.project || '', request_id: requestId,
+      reader_selection: {position: JSON.parse(JSON.stringify(annotation.position)),
+        pageLabel: annotation.pageLabel || '', sortIndex: annotation.sortIndex || '',
+        capture_method: 'reader_selection_popup', bridge_version: BRIDGE_VERSION}
     };
-
-    log(`Posting reverse card creation to SearchTools: ${JSON.stringify(payload).slice(0, 120)}...`);
     let data = await httpPost(`${SEARCHTOOLS_HOST}/api/evidence-cards/create-from-zotero`, payload);
-    if (data && data.ok) {
-      showToast('📌 论据已保存为证据卡！', `卡片编号: ${data.card.id} (第 ${pageLabel} 页)`);
-      if (sectionRefreshCallback) {
-        sectionRefreshCallback();
-      }
-    }
-  } catch (e) {
-    log(`Error in createCardFromSelection: ${e}`);
-    showToast('❌ 保存证据卡失败', String(e));
+    if (!data?.ok || !data.card) throw new Error(data?.error || '后端未确认建卡');
+    lastCapture = {request_id: requestId, card_id: data.card.id, card: data.card};
+    log('Reader capture verified: ' + JSON.stringify({card_id: data.card.id, page: data.card.page, request_id: requestId}));
+    showToast('📌 已保存并核验选文', `${data.card.id} · p.${data.card.page}`);
+    if (sectionRefreshCallback) sectionRefreshCallback();
+    return data.card;
+  } catch (error) {
+    lastCapture = {request_id: requestId, error: String(error)};
+    log('Reader capture failed: ' + error);
+    showToast('❌ 保存证据卡失败', String(error));
+    throw error;
   }
 }
 
-// ItemPane Section Synchronous Render
+
 function renderEvidenceSectionSync(doc, body, item) {
   body.innerHTML = '';
   doc = body.ownerDocument || doc;
@@ -802,27 +860,84 @@ function unregisterItemPaneSection() {
   }
 }
 
+// Bounded integration check: creates a real native Reader selection and clicks the
+// same popup button as the user. It accepts only a card in an explicit acceptance scope.
+async function acceptanceCapture(action) {
+  let data = await httpGet(`${SEARCHTOOLS_HOST}/api/evidence-cards/locate?id=${encodeURIComponent(action.card_id)}`);
+  let card = action.card;
+  if (!card || !String(card.tags || '').split(',').includes('acceptance') || !card.project) {
+    throw new Error('反向验收只允许显式标记的独立验收卡');
+  }
+  await highlightAndOpenCard(data);
+  let attachment = await Zotero.Items.getByLibraryAndKeyAsync(Zotero.Libraries.userLibraryID, data.attachment_key);
+  let reader = await getReadyReader(attachment);
+  let view = reader._internalReader._primaryView;
+  await view._ensureBasicPageData(data.page_index);
+  let chars = JSON.parse(JSON.stringify(view._pdfPages[data.page_index].chars));
+  log('Acceptance: native character layer loaded');
+  let selected = chars.map((char, index) => ({char, index})).filter(({char}) => {
+    let box = char.rect;
+    if (!box) return false;
+    let center = [(box[0]+box[2])/2, (box[1]+box[3])/2];
+    return data.rects.some(r => center[0]>=r[0]-1 && center[0]<=r[2]+1 && center[1]>=r[1]-1 && center[1]<=r[3]+1);
+  });
+  if (!selected.length) throw new Error('无法从真实阅读器字符层建立选区');
+  let start = selected[0].index, end = selected[selected.length-1].index + 1;
+  let nativeChars = chars.slice(start, end);
+  let text = nativeChars.filter(c => !c.ignorable).map(c => c.c + ((c.spaceAfter || c.lineBreakAfter || c.paragraphBreakAfter) ? ' ' : '')).join('').trim();
+  let position = {pageIndex: data.page_index, rects: data.rects};
+  let meta = view.getAnnotationMeta(Components.utils.cloneInto(position, reader._iframeWindow));
+  let ranges = [{pageIndex: data.page_index, position, text, sortIndex: meta.sortIndex,
+    anchorOffset: start, headOffset: end, anchor: true, head: true, collapsed: false}];
+  lastSelectionPopup = null;
+  view._setSelectionRanges(Components.utils.cloneInto(ranges, reader._iframeWindow));
+  view._render();
+  log('Acceptance: native selection created, waiting for popup');
+  let popup = await waitForValue(() => lastSelectionPopup?.reader?.itemID === reader.itemID && lastSelectionPopup.button.isConnected ? lastSelectionPopup : null,
+    '真实划选弹窗没有渲染插件建卡按钮');
+  let requestId = 'acceptance-' + action.action_id;
+  popup.options = {project: card.project, request_id: requestId};
+  popup.input.value = card.claim || '';
+  lastCapture = null;
+  log('Acceptance: clicking rendered reader capture button');
+  popup.button.click();
+  let captured = await waitForValue(() => lastCapture?.request_id === requestId ? lastCapture : null,
+    '阅读器按钮未返回建卡结果', 25000);
+  if (captured.error) throw new Error(captured.error);
+  return {bridge_version: BRIDGE_VERSION, card_id: captured.card_id, page_index: captured.card.locate?.page_index,
+    popup_rendered: true, native_character_count: nativeChars.length,
+    selection_quote: text, original_card_id: action.card_id};
+}
+
 function startActionPoller() {
   if (pollIntervalId) return;
   pollIntervalId = setInterval(async () => {
+    if (pollBusy) return;
+    pollBusy = true;
     try {
       let data = await httpGet(`${SEARCHTOOLS_HOST}/api/zotero/actions`);
-      let actions = data.actions || [];
-      for (let act of actions) {
-        if (act.action === 'open_card' && act.card_id) {
-          log(`Poller received open_card action for ${act.card_id}`);
-          if (act.locate && act.locate.rects) {
-            await highlightAndOpenCard(act.locate);
+      for (let action of data.actions || []) {
+        try {
+          let result;
+          if (action.action === 'open_card' && action.card_id) {
+            result = action.locate ? await highlightAndOpenCard(action.locate) : await handleCardOpen(action.card_id);
+          } else if (action.action === 'acceptance_capture') {
+            result = await acceptanceCapture(action);
+          } else if (action.action === 'cleanup') {
+            result = await cleanupTempAnnotations();
           } else {
-            await handleCardOpen(act.card_id);
+            throw new Error('未知的阅读器动作：' + action.action);
           }
-        } else if (act.action === 'cleanup') {
-          log('Poller received cleanup action');
-          await cleanupTempAnnotations();
+          if (action.action_id) await httpPost(`${SEARCHTOOLS_HOST}/api/zotero/action-ack`, {action_id: action.action_id, result});
+        } catch (error) {
+          log('Reader action failed: ' + error + '\n' + (error.stack || ''));
+          if (action.action_id) await httpPost(`${SEARCHTOOLS_HOST}/api/zotero/action-ack`, {action_id: action.action_id, error: String(error), result: {bridge_version: BRIDGE_VERSION}});
         }
       }
-    } catch (e) {
-      // Server might be paused or starting, ignore silent network error
+    } catch (error) {
+      // Offline backends are retried on the next tick; no concurrent polling.
+    } finally {
+      pollBusy = false;
     }
   }, 1000);
 }
@@ -929,6 +1044,35 @@ function onMainWindowUnload({ window }) {
   } catch (e) {}
 }
 
+// Repair stale addon metadata through Mozilla's supported installer, rather than
+// editing extensions.json or registering a fabricated addon record.
+function reconcileRegisteredVersion(rootURI, registeredVersion) {
+  if (registeredVersion === BRIDGE_VERSION || !String(rootURI).startsWith('jar:file:')) return;
+  setTimeout(async () => {
+    let temporary;
+    try {
+      let { AddonManager } = ChromeUtils.importESModule('resource://gre/modules/AddonManager.sys.mjs');
+      let uri = Services.io.newURI(rootURI).QueryInterface(Ci.nsIJARURI);
+      let source = uri.JARFile.QueryInterface(Ci.nsIFileURL).file;
+      let directory = Services.dirsvc.get('TmpD', Ci.nsIFile);
+      let name = 'evidence-bridge-' + Services.uuid.generateUUID().toString() + '.xpi';
+      source.copyTo(directory, name);
+      temporary = directory.clone();
+      temporary.append(name);
+      let install = await AddonManager.getInstallForFile(temporary);
+      if (!install || install.addon.id !== ADDON_ID || install.addon.version !== BRIDGE_VERSION) {
+        throw new Error('本地插件包身份或版本不匹配');
+      }
+      log('Refreshing registered plugin version via AddonManager: ' + BRIDGE_VERSION);
+      await install.install();
+    } catch (error) {
+      log('Plugin version registration failed: ' + error);
+    } finally {
+      if (temporary?.exists()) temporary.remove(false);
+    }
+  }, 2000);
+}
+
 // Zotero 7/8 Plugin Lifecycle Hooks
 async function startup(data, reason) {
   let rootURI = (data && data.rootURI) || 'chrome://evidence-bridge/';
@@ -994,19 +1138,33 @@ async function startup(data, reason) {
         'renderTextSelectionPopup',
         (event) => {
           let { reader, doc, params, append } = event;
+          let container = doc.createElement('div');
+          container.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;padding:4px;';
+          let input = doc.createElement('input');
+          input.className = 'evidence-bridge-claim-input';
+          input.placeholder = '一个明确论点（留空则保存待整理摘录）';
+          input.setAttribute('aria-label', '这段原文支撑的论点');
+          input.style.cssText = 'min-width:230px;flex:1;';
           let btn = doc.createElement('button');
           btn.className = 'evidence-bridge-popup-btn';
           btn.textContent = '📌 存为证据卡';
-          btn.title = '将划选文字存入 SearchTools 证据卡库并在开题报告中直接引用';
-          btn.style.cssText =
-            'background:#1e293b;color:#facc15;border:1px solid #eab308;border-radius:4px;padding:3px 8px;font-size:12px;font-weight:bold;cursor:pointer;margin-left:4px;display:inline-flex;align-items:center;';
-          btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            let text = (params && params.annotation && params.annotation.text) || (reader.getSelectedText && reader.getSelectedText());
-            let pageIndex = (params && params.annotation && params.annotation.position && params.annotation.position.pageIndex != null) ? params.annotation.position.pageIndex : (reader._internalReader?.pageIndex || 0);
-            await createCardFromSelection(reader, text, pageIndex);
+          btn.title = '保存真实选文、坐标与论点，并回验 PDF 原文';
+          let popup = {reader, doc, annotation: params.annotation, button: btn, input, options: {}};
+          lastSelectionPopup = popup;
+          btn.addEventListener('click', async event => {
+            event.stopPropagation();
+            if (btn.disabled) return;
+            btn.disabled = true;
+            try {
+              await createCardFromSelection(reader, params.annotation, input.value, popup.options);
+              btn.textContent = '已核验保存';
+            } catch (error) {
+              btn.disabled = false;
+              btn.textContent = '保存失败，重试';
+            }
           });
-          append(btn);
+          container.append(input, btn);
+          append(container);
         },
         ADDON_ID
       );
@@ -1063,12 +1221,14 @@ async function startup(data, reason) {
     log(`Error on attaching menus: ${e}`);
   }
 
-  log('SearchTools Evidence Bridge v' + version + ' started successfully!');
+  log('SearchTools Evidence Bridge build ' + BRIDGE_VERSION + ' started (registered version ' + version + ')');
+  reconcileRegisteredVersion(rootURI, version);
 }
 
 function shutdown(data, reason) {
   log('Shutting down SearchTools Evidence Bridge...');
   stopActionPoller();
+  Zotero?.Reader?._unregisterEventListenerByPluginID?.(ADDON_ID);
   unregisterItemPaneSection();
 
   let win = Zotero ? Zotero.getMainWindow() : null;

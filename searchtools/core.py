@@ -61,7 +61,8 @@ def gpu_busy():
 
 
 class Store:
-    def __init__(self, data):
+    def __init__(self, data, cfg=None):
+        self.cfg = cfg
         self.data = Path(data).expanduser().resolve()
         self.data.mkdir(parents=True, exist_ok=True)
         self.data.chmod(0o700)
@@ -76,12 +77,15 @@ class Store:
             CREATE TABLE IF NOT EXISTS evidence_cards(id TEXT PRIMARY KEY,project TEXT NOT NULL,job_id TEXT,paper_id TEXT,zotero_key TEXT,citation TEXT,doi TEXT,title TEXT,page TEXT,quote TEXT,summary TEXT,claim TEXT,score REAL,pinned INTEGER DEFAULT 0,tags TEXT,created REAL);
             CREATE TABLE IF NOT EXISTS candidate_batches(id TEXT PRIMARY KEY,scope_id TEXT,topic TEXT,query TEXT,candidates_json TEXT,status TEXT DEFAULT 'pending_confirmation',created REAL);
             CREATE TABLE IF NOT EXISTS trace_events(id TEXT PRIMARY KEY,scope_id TEXT,tool TEXT,status TEXT,summary TEXT,detail_json TEXT,created REAL);
+            CREATE TABLE IF NOT EXISTS zotero_actions(id TEXT PRIMARY KEY,payload TEXT,status TEXT,lease_until REAL,created REAL,error TEXT);
             CREATE TABLE IF NOT EXISTS kv_meta(key TEXT PRIMARY KEY, value TEXT);
             ''')
+            if 'result_json' not in {row[1] for row in db.execute('PRAGMA table_info(zotero_actions)')}:
+                db.execute("ALTER TABLE zotero_actions ADD COLUMN result_json TEXT DEFAULT '{}'")
             # Idempotent column migrations for databases created by v0.1 - v2.
             for table,cols in {'papers':{'zotero_item':'TEXT','attachment_key':'TEXT','citekey':'TEXT','authors':'TEXT','year':'TEXT','publication':'TEXT','title':'TEXT','doi':'TEXT','origin':"TEXT DEFAULT 'upload'",'added':'REAL'},
                                'jobs':{'options':'TEXT'},'projects':{'zotero_collection':'TEXT','item_keys_json':'TEXT'},
-                               'evidence_cards':{'summary':'TEXT','claim':'TEXT','pinned':'INTEGER DEFAULT 0','tags':'TEXT','attachment_key':'TEXT','citekey':'TEXT','authors':'TEXT','year':'TEXT','zotero_link':'TEXT','used_in_json':"TEXT DEFAULT '[]'",'model':'TEXT','page_index':'INTEGER','page_label':'TEXT','rects_json':'TEXT','locate_status':'TEXT'}}.items():
+                               'evidence_cards':{'summary':'TEXT','claim':'TEXT','pinned':'INTEGER DEFAULT 0','tags':'TEXT','attachment_key':'TEXT','citekey':'TEXT','authors':'TEXT','year':'TEXT','zotero_link':'TEXT','used_in_json':"TEXT DEFAULT '[]'",'model':'TEXT','page_index':'INTEGER','page_label':'TEXT','rects_json':'TEXT','locate_status':'TEXT','provenance_json':'TEXT'}}.items():
                 have={r[1] for r in db.execute(f'PRAGMA table_info({table})')}
                 for col,kind in cols.items():
                     if col not in have:
@@ -582,7 +586,11 @@ class Store:
             'page_label': c.get('page_label') or page_val,
             'rects': rects_list
         }
+        stored = json.loads(c.get('provenance_json') or '{}')
+        location = stored.get('location') or {}
+        c['locate'] = dict(location, card_id=c.get('id'), attachment_key=c.get('attachment_key'), zotero_key=zot_key) if location.get('version') == 3 else dict(c['locate'], status='needs_revalidation', rects=[])
         c['provenance'] = {
+            **stored,
             'job_id': c.get('job_id') or '',
             'scope_id': c.get('project') or '',
             'model': c.get('model') or '',
@@ -632,28 +640,66 @@ class Store:
         rows = self.rows('SELECT * FROM evidence_cards WHERE id=?', (cid,))
         return self._enrich_card_v2(rows[0]) if rows else None
 
+    def capture_reader_selection(self, data):
+        from .reader_capture import validate_position, verify_selection_location
+        from .locate import resolve_attachment_pdf, locate_quote_in_pdf
+        from .zotero import Library, check_key
+        quote = str(data.get('quote') or '').strip()
+        if not quote:
+            raise ValueError('划选内容为空')
+        att_key = check_key(data.get('attachment_key'))
+        zot_key = check_key(data.get('zotero_key'))
+        selection = data.get('reader_selection') or {}
+        position = selection.get('position')
+        validate_position(position)
+        lib = Library()
+        attachment = lib.raw_item(att_key).get('data', {})
+        if attachment.get('itemType') != 'attachment' or attachment.get('parentItem') != zot_key:
+            raise ValueError('附件与文献归属不匹配')
+        meta = lib.summary(lib.raw_item(zot_key))
+        path = resolve_attachment_pdf(att_key, zot_key)
+        if path is None:
+            raise ValueError('无法读取划选所对应的 PDF')
+        location = locate_quote_in_pdf(path, quote)
+        verify_selection_location(position, location)
+        pid = str(data.get('project') or '').strip()
+        if not pid:
+            # Do not silently file reader captures into the last unrelated research scope.
+            projects = self.rows('SELECT id FROM projects WHERE name=? ORDER BY created LIMIT 1', ('Zotero 阅读器摘录',))
+            pid = projects[0]['id'] if projects else self.create_project('Zotero 阅读器摘录')
+        self.project(pid)
+        request_id = str(data.get('request_id') or uuid.uuid4().hex)
+        cid = 'ev_reader_' + hashlib.sha256((pid + ':' + request_id).encode()).hexdigest()[:16]
+        existing = self.get_evidence_card(cid)
+        if existing:
+            if existing.get('quote') != quote or existing.get('attachment_key') != att_key:
+                raise ValueError('重复请求编号对应不同的选文')
+            return existing
+        claim = str(data.get('claim') or '').strip()
+        card = dict(id=cid, job_id='zotero_reader_selection', zotero_key=zot_key,
+                    attachment_key=att_key, title=meta.get('title'), authors=meta.get('creators'),
+                    citekey=meta.get('citekey'), year=meta.get('year'), doi=meta.get('doi'),
+                    quote=quote, claim=claim or '待整理摘录：尚未填写论点', summary=quote,
+                    score=0, pinned=1, tags='zotero_reader,manual',
+                    page=','.join(dict.fromkeys(span['page_label'] for span in location['spans'])),
+                    page_index=location['page_index'], page_label=location['page_label'],
+                    rects=location['rects'], locate_status='exact')
+        self.save_evidence_card(pid, card)
+        provenance = {'version': 3, 'origin': 'reader_selection', 'reader_selection': selection,
+                      'request_id': request_id, 'claim_review': 'human_provided' if claim else 'needs_claim',
+                      'location': location}
+        with self.db() as db:
+            db.execute('UPDATE evidence_cards SET provenance_json=? WHERE id=?',
+                       (json.dumps(provenance, ensure_ascii=False), cid))
+        self.log_trace(pid, 'reader_capture', 'done', '阅读器原文与选区已回验',
+                       {'card_id': cid, 'attachment_key': att_key, 'request_id': request_id})
+        return self.get_evidence_card(cid)
+
     def locate_card(self, cid: str, force: bool = False) -> dict:
         """Run PDF precise quote location for an evidence card and persist rects & page_index."""
         card = self.get_evidence_card(cid)
         if not card:
             return {'status': 'not_found', 'error': f'Card {cid} not found'}
-        if not force and card.get('locate_status') in ('exact', 'fuzzy') and card.get('rects_json'):
-            try:
-                rects = json.loads(card['rects_json'])
-                return {
-                    'card_id': cid,
-                    'status': card['locate_status'],
-                    'page_index': card.get('page_index', 0),
-                    'page_label': card.get('page_label', '1'),
-                    'rects': rects,
-                    'attachment_key': card.get('attachment_key') or card.get('source', {}).get('attachment_key') or '',
-                    'zotero_key': card.get('zotero_key') or card.get('source', {}).get('item_key') or '',
-                    'quote': card.get('quote') or '',
-                    'cached': True
-                }
-            except Exception:
-                pass
-
         from .locate import resolve_attachment_pdf, locate_quote_in_pdf
         att_key = card.get('attachment_key') or card.get('source', {}).get('attachment_key') or ''
         zot_key = card.get('zotero_key') or card.get('source', {}).get('item_key') or ''
@@ -661,21 +707,42 @@ class Store:
         page_hint = card.get('page') or card.get('source', {}).get('pages') or ''
 
         pdf_path = resolve_attachment_pdf(att_key, zot_key)
+        if not pdf_path and not att_key and not zot_key and card.get('paper_id'):
+            rows = self.rows('SELECT * FROM papers WHERE id=? AND project=?', (card['paper_id'], card['project']))
+            if rows:
+                path = self.folder(card['project'])/'papers'/rows[0]['name']
+                if path.suffix.lower() == '.pdf' and path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == rows[0]['sha']:
+                    pdf_path = path
+
         if not pdf_path:
-            res = {'status': 'pdf_missing', 'page_index': 0, 'page_label': '1', 'rects': [], 'error': 'Attachment PDF not found in Zotero storage'}
+            res = {'status': 'pdf_missing', 'page_index': None, 'page_label': None, 'rects': [], 'error': 'Attachment PDF not found in Zotero storage'}
         else:
             res = locate_quote_in_pdf(pdf_path, quote, page_hint)
 
+        provenance = json.loads(card.get('provenance_json') or '{}')
+        if provenance.get('reader_selection') and res.get('status') == 'exact':
+            from .reader_capture import verify_selection_location
+            try:
+                verify_selection_location(provenance['reader_selection']['position'], res)
+            except ValueError as exc:
+                res = {'version': 3, 'status': 'selection_mismatch', 'rects': [], 'spans': [], 'error': str(exc)}
+        provenance['location'] = res
         with self.db() as db:
             db.execute('''
             UPDATE evidence_cards SET
                 page_index=?,
                 page_label=?,
                 rects_json=?,
-                locate_status=?
+                locate_status=?, provenance_json=?
             WHERE id=?
-            ''', (res.get('page_index', 0), str(res.get('page_label', '1')), json.dumps(res.get('rects', [])), res.get('status', 'failed'), cid))
+            ''', (res.get('page_index', 0), str(res.get('page_label', '1')), json.dumps(res.get('rects', [])), res.get('status', 'failed'), json.dumps(provenance, ensure_ascii=False), cid))
 
+        if res.get('status') == 'exact':
+            labels = list(dict.fromkeys(span['page_label'] for span in res.get('spans', [])))
+            physical_page = res['page_index'] + 1
+            with self.db() as db:
+                db.execute('UPDATE evidence_cards SET page=?,zotero_link=? WHERE id=?',
+                           (','.join(labels), f'zotero://open-pdf/library/items/{att_key}?page={physical_page}', cid))
         res['card_id'] = cid
         res['attachment_key'] = att_key
         res['zotero_key'] = zot_key
@@ -685,19 +752,37 @@ class Store:
         return res
 
     def enqueue_zotero_action(self, action: dict):
-        if not hasattr(self, '_zotero_actions'):
-            self._zotero_actions = []
-        self._zotero_actions.append(action)
-        if len(self._zotero_actions) > 50:
-            self._zotero_actions = self._zotero_actions[-50:]
+        import uuid
+        aid = uuid.uuid4().hex
+        with self.db() as db:
+            db.execute('INSERT INTO zotero_actions(id,payload,status,lease_until,created,error) VALUES(?,?,?,?,?,?)',
+                       (aid, json.dumps(action), 'pending', 0, time.time(), ''))
+        return aid
+
+    def zotero_action_status(self, aid):
+        rows = self.rows('SELECT id,status,error,result_json FROM zotero_actions WHERE id=?', (aid,))
+        if not rows:
+            return {'status': 'not_found'}
+        row = rows[0]
+        row['result'] = json.loads(row.pop('result_json') or '{}')
+        return row
+
+    def ack_zotero_action(self, aid, error='', result=None):
+        with self.db() as db:
+            db.execute("UPDATE zotero_actions SET status=?,error=?,result_json=? WHERE id=? AND status='delivered'",
+                       ('failed' if error else 'done', str(error)[:2000], json.dumps(result or {}, ensure_ascii=False), aid))
+        return self.zotero_action_status(aid)
 
     def pop_zotero_actions(self) -> list[dict]:
-        import time
         self._last_zotero_poll = time.time()
-        if not hasattr(self, '_zotero_actions'):
-            self._zotero_actions = []
-        actions = list(self._zotero_actions)
-        self._zotero_actions.clear()
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = db.execute("SELECT id,payload FROM zotero_actions WHERE status IN ('pending','delivered') AND lease_until<? AND created>? ORDER BY created LIMIT 10",
+                              (time.time(), time.time()-300)).fetchall()
+            actions = []
+            for aid, payload in rows:
+                db.execute("UPDATE zotero_actions SET status='delivered',lease_until=? WHERE id=?", (time.time()+60, aid))
+                actions.append(dict(json.loads(payload), action_id=aid))
         return actions
 
     def record_card_usage(self, card_ids: list[str], doc_ref: str = 'deeptutor:draft', anchor: str = '') -> list[dict]:
@@ -748,28 +833,27 @@ class Store:
             return re.sub(r'[^a-zA-Z0-9\u4e00-\u9fa5]', '', str(s or '')).lower()
 
         for ctx in contexts:
+            if ctx.get('atomic_schema_version') != 3 or not ctx.get('claim') or not ctx.get('quote'):
+                continue
+            from .atomic import validate_records
+            verified, _ = validate_records([ctx], {'text': ctx.get('source_context') or ''})
+            if not verified:
+                continue
             docname = ctx.get('docname') or ctx.get('name') or ''
             c_doc = _clean_str(docname)
-            matched = None
-            for p in papers:
-                if (p['name'] and p['name'] in docname) or (docname and docname in p['name']) or (p['title'] and p['title'] in docname):
-                    matched = p
-                    break
-                c_pname = _clean_str(p.get('name'))
-                c_ptitle = _clean_str(p.get('title'))
-                c_citekey = _clean_str(p.get('citekey'))
-                # Strip known paperqa prefixes/suffixes like unknownauthorsunknownyear and pages12
-                c_doc_core = re.sub(r'^(unknownauthors)?(unknownyear)?', '', c_doc)
-                c_doc_core = re.sub(r'pages?\d+.*$', '', c_doc_core)
-                if c_doc:
-                    if (c_pname and (c_pname in c_doc or c_doc in c_pname)) or \
-                       (c_ptitle and len(c_ptitle) >= 6 and (c_ptitle[:18] in c_doc or c_doc in c_ptitle or (c_doc_core and len(c_doc_core) >= 5 and c_doc_core in c_ptitle))) or \
-                       (c_citekey and len(c_citekey) >= 6 and (c_citekey in c_doc or c_citekey.lower() in docname.lower())):
-                        matched = p
-                        break
-            # Fallback if only 1 paper in project
-            if not matched and len(papers) == 1:
-                matched = papers[0]
+            candidates = []
+            core_name = re.sub(r'pages?\d+.*$', '', c_doc)
+            for paper in papers:
+                identities = [_clean_str(paper.get(field)) for field in ('title', 'citekey')]
+                identities.append(_clean_str(Path(paper['name']).stem))
+                if any(len(identity) >= 8 and identity in core_name for identity in identities):
+                    candidates.append(paper)
+            if ctx.get('source_paper_id'):
+                candidates = [paper for paper in papers if paper['id'] == ctx['source_paper_id']
+                              and paper['sha'] == ctx.get('source_sha256')]
+            if len(candidates) != 1:
+                continue
+            matched = candidates[0]
 
             zot_key = (matched.get('zotero_item') if matched else None) or ''
             att_key = (matched.get('attachment_key') if matched else None) or ''
@@ -822,7 +906,9 @@ class Store:
             # 3. Otherwise, extract the atomic proposition from the first sentence of summary.
             # 4. Fallback to concise prompt question, avoiding long compound multi-aspect questions.
             card_claim = ''
-            if claim and len(str(claim).strip()) > 0:
+            if ctx.get('claim'):
+                card_claim = str(ctx['claim']).strip()
+            elif claim and len(str(claim).strip()) > 0:
                 card_claim = str(claim).strip()
             elif ctx.get('claim') and len(str(ctx['claim']).strip()) > 0:
                 card_claim = str(ctx['claim']).strip()
@@ -856,6 +942,13 @@ class Store:
                 'tags': ''
             }
             cid = self.save_evidence_card(pid, card)
+            provenance = {'version': 3, 'relation': ctx.get('relation'), 'limitation': ctx.get('limitation'),
+                          'source_context': ctx.get('source_context'), 'validation': 'context_verbatim',
+                          'claim_review': 'model_extracted_unreviewed',
+                          'source_paper_id': matched['id'], 'source_sha256': matched['sha']}
+            with self.db() as db:
+                db.execute('UPDATE evidence_cards SET provenance_json=? WHERE id=?', (json.dumps(provenance, ensure_ascii=False), cid))
+            self.locate_card(cid)
             rows = self.rows('SELECT * FROM evidence_cards WHERE id=?', (cid,))
             if rows:
                 saved.append(self._enrich_card_v2(rows[0]))
@@ -878,8 +971,8 @@ class Store:
         if auto_writeback:
             try:
                 self.writeback_cards_to_zotero([c['id'] for c in cards])
-            except Exception:
-                pass
+            except Exception as exc:
+                raise RuntimeError('Zotero note writeback failed') from exc
 
         from .zotero import format_gbt7714_entry, Library
         lib = Library()
@@ -1029,6 +1122,22 @@ class Store:
         options = dict(options or {})
         if len(json.dumps(options)) > 20000:
             raise ValueError('任务参数过大')
+        frozen_settings = None
+        if self.cfg and kind in PAPERQA_KINDS:
+            from .models import build_paperqa_settings
+            from .model_events import read_selection
+            catalog = catalog_for(self.cfg).load()
+            follows_dt = options.get('use_deeptutor_model') or options.get('mode', catalog.get('mode', 'deeptutor')) == 'deeptutor'
+            if follows_dt:
+                state = read_selection(options.get('model_client_id'), options.get('model_sync_revision'))
+                if state:
+                    options['deeptutor_selection'] = state['selection']
+                    options['model_sync_revision'] = state['revision']
+                    options['model_client_id'] = state['client_id']
+                    options['model_session_id'] = state.get('session_id', '')
+            frozen_settings = build_paperqa_settings(catalog, options=options)
+            options['model_snapshot'] = {'llm': frozen_settings['llm'], 'summary_llm': frozen_settings['summary_llm'],
+                                         'embedding': frozen_settings['embedding']}
         manifest=self.rows('SELECT * FROM papers WHERE project=?',(pid,))
         if options.get('papers'):
             wanted=set(options['papers'])
@@ -1040,6 +1149,10 @@ class Store:
         work=self.folder(pid)/'jobs'/jid
         papers=work/'papers'
         papers.mkdir(parents=True)
+        if frozen_settings is not None:
+            settings_file = work/'paperqa_settings.json'
+            settings_file.write_text(json.dumps(frozen_settings, ensure_ascii=False))
+            os.chmod(settings_file, 0o600)
         # The snapshot always holds every project paper so the shared project index stays
         # complete; a paper subset only narrows which indexed documents are consulted.
         for paper in manifest:
@@ -1121,16 +1234,17 @@ class Worker:
         settings_path = self.cfg.get('paperqa_settings')
         if engine == 'paperqa':
             try:
-                from .models import build_paperqa_settings
-                cat = catalog_for(self.cfg)
-                opts = json.loads(job.get('options') or '{}') if isinstance(job.get('options'), str) else (job.get('options') or {})
-                s_dict = build_paperqa_settings(cat.load(), options=opts)
                 settings_file = work/'paperqa_settings.json'
-                settings_file.write_text(json.dumps(s_dict, ensure_ascii=False, indent=2))
-                os.chmod(settings_file, 0o600)
+                if not settings_file.exists():
+                    from .models import build_paperqa_settings
+                    opts = json.loads(job.get('options') or '{}') if isinstance(job.get('options'), str) else (job.get('options') or {})
+                    s_dict = build_paperqa_settings(catalog_for(self.cfg).load(), options=opts)
+                    settings_file.write_text(json.dumps(s_dict, ensure_ascii=False, indent=2))
+                    os.chmod(settings_file, 0o600)
                 settings_path = str(settings_file)
-            except Exception:
-                pass
+            except Exception as exc:
+                self.store.update(jid, 'failed', '模型配置同步失败：' + str(exc))
+                return
         payload={**job,'papers':str(papers),'output':str(work/'result.json'),'manifest':manifest,
                  'index':str(folder/'index'),'settings':settings_path}
         (work/'input.json').write_text(json.dumps(payload,ensure_ascii=False))
@@ -1209,11 +1323,9 @@ class Worker:
                         raise RuntimeError(err_detail or '引擎执行失败，请查看任务日志')
                     result=json.loads((work/'result.json').read_text())
                     (folder/'results'/f'{jid}.md').write_text(result.get('answer','任务完成'))
-                    saved_cards = []
-                    try:
-                        saved_cards = self.store.extract_and_save_evidence_from_result(pid, jid, result)
-                    except Exception:
-                        pass
+                    saved_cards = self.store.extract_and_save_evidence_from_result(pid, jid, result)
+                    if result.get('contexts') and not saved_cards:
+                        raise RuntimeError('模型已返回片段，但来源验证或证据卡持久化未通过；请检查任务日志')
                     self.store.update(jid,'done','已完成')
                     try:
                         job_rows = self.store.rows('SELECT kind, prompt FROM jobs WHERE id=?', (jid,))

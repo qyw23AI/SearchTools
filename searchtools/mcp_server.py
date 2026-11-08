@@ -34,7 +34,7 @@ def _cfg():
 
 def _store() -> Store:
     c = _cfg()
-    return Store(c.get('data') or Path.home() / 'ResearchWorkspace')
+    return Store(c.get('data') or Path.home() / 'ResearchWorkspace', cfg=c)
 
 
 def _api(path: str, method: str = 'GET', payload: dict | None = None, timeout: float = 15.0) -> dict:

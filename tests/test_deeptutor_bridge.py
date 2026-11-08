@@ -92,6 +92,15 @@ class DeepTutorBridgeTests(unittest.TestCase):
                 }
             ]
         }
+        # Legacy chunks are not evidence until atomized and uniquely attributed.
+        self.assertEqual(self.store.extract_and_save_evidence_from_result(self.pid, 'legacy', mock_result), [])
+        paper_id = self.store.import_paper(self.pid, 'flashattention2.txt', b'FlashAttention-2 source')
+        with self.store.db() as db:
+            db.execute('UPDATE papers SET title=? WHERE id=?', ('FlashAttention-2', paper_id))
+        context = mock_result['contexts'][0]
+        context.update(atomic_schema_version=3, docname='FlashAttention-2',
+                       claim='FlashAttention-2 achieves a 2x speedup over FlashAttention.',
+                       quote=context['text'], source_context=context['text'], relation='supports')
         extracted = self.store.extract_and_save_evidence_from_result(self.pid, 'job-123', mock_result)
         self.assertEqual(len(extracted), 1)
         all_cards = self.store.list_evidence_cards(self.pid)

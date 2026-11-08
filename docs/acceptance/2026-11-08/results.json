@@ -1,0 +1,202 @@
+{
+  "zotero_version": "10.0.8",
+  "bridge_version": "1.2.2",
+  "project_id": "fe8704d87e624cad94430bfa025d1700",
+  "english": {
+    "card_id": "ev_01c2e5df2f",
+    "open": {
+      "id": "1708a99eec51418994e611416cdaf922",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.2",
+        "attachment_key": "QF757IAF",
+        "page_index": 6,
+        "annotation_key": "KBNABNZF",
+        "annotation_in_reader": true,
+        "page_rendered": true,
+        "selected_annotation": true
+      }
+    },
+    "reverse": {
+      "id": "bf4c09aa99a14a709a4c49db274b7646",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.2",
+        "card_id": "ev_reader_5b673456ec833a7e",
+        "page_index": 6,
+        "popup_rendered": true,
+        "native_character_count": 234,
+        "selection_quote": "It is worth noting that the proposed mechanism preserves the energy efficiency of SNNs, as the proxy network and the critic network are used exclusively during training and are discarded during deployment, introducing no additional computational overhead during deployment.",
+        "original_card_id": "ev_01c2e5df2f"
+      }
+    }
+  },
+  "chinese": {
+    "card_id": "ev_48f6164618",
+    "open": {
+      "id": "04665c05821c472bae9f684a0de891be",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.2",
+        "attachment_key": "8TEGCNID",
+        "page_index": 7,
+        "annotation_key": "NMH25RK4",
+        "annotation_in_reader": true,
+        "page_rendered": true,
+        "selected_annotation": true
+      }
+    },
+    "reverse": {
+      "id": "ff42fcbf90e9407e93c2655ff991144c",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.2",
+        "card_id": "ev_reader_27653fa724690cab",
+        "page_index": 7,
+        "popup_rendered": true,
+        "native_character_count": 25,
+        "selection_quote": "利用 SRL-CPG 模型能降低 84.6 % 的控制能耗.",
+        "original_card_id": "ev_48f6164618"
+      }
+    },
+    "reopen": {
+      "id": "94746e0351c14629a1aed76b55e166b4",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.2",
+        "attachment_key": "8TEGCNID",
+        "page_index": 7,
+        "annotation_key": "MTBFHBZA",
+        "annotation_in_reader": true,
+        "page_rendered": true,
+        "selected_annotation": true
+      }
+    },
+    "idempotency": {
+      "same_card": true
+    }
+  },
+  "cross_page": {
+    "card_id": "ev_356a5a3de0",
+    "page_indices": [
+      5,
+      6
+    ],
+    "span_count": 6,
+    "receipt": {
+      "id": "7113e7603ce64b629ec51de16ce47661",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.2",
+        "spans": [
+          {
+            "bridge_version": "1.2.2",
+            "attachment_key": "QF757IAF",
+            "page_index": 6,
+            "annotation_key": "7QGTDYJF",
+            "annotation_in_reader": true,
+            "page_rendered": true,
+            "selected_annotation": true
+          },
+          {
+            "bridge_version": "1.2.2",
+            "attachment_key": "QF757IAF",
+            "page_index": 6,
+            "annotation_key": "ZCV4ZYVZ",
+            "annotation_in_reader": true,
+            "page_rendered": true,
+            "selected_annotation": true
+          },
+          {
+            "bridge_version": "1.2.2",
+            "attachment_key": "QF757IAF",
+            "page_index": 6,
+            "annotation_key": "IQHGUDK2",
+            "annotation_in_reader": true,
+            "page_rendered": true,
+            "selected_annotation": true
+          },
+          {
+            "bridge_version": "1.2.2",
+            "attachment_key": "QF757IAF",
+            "page_index": 6,
+            "annotation_key": "G46YNNTP",
+            "annotation_in_reader": true,
+            "page_rendered": true,
+            "selected_annotation": true
+          },
+          {
+            "bridge_version": "1.2.2",
+            "attachment_key": "QF757IAF",
+            "page_index": 5,
+            "annotation_key": "3CITPTSW",
+            "annotation_in_reader": true,
+            "page_rendered": true,
+            "selected_annotation": true
+          },
+          {
+            "bridge_version": "1.2.2",
+            "attachment_key": "QF757IAF",
+            "page_index": 5,
+            "annotation_key": "CL73XXXZ",
+            "annotation_in_reader": true,
+            "page_rendered": true,
+            "selected_annotation": true
+          }
+        ]
+      }
+    }
+  },
+  "negative_cases": {
+    "cases": [
+      {
+        "case": "wrong_page",
+        "status": 422,
+        "response": {
+          "ok": false,
+          "error": "划选物理页码与原文回验不一致"
+        }
+      },
+      {
+        "case": "wrong_rect",
+        "status": 422,
+        "response": {
+          "ok": false,
+          "error": "划选矩形与引文所在原文不一致"
+        }
+      },
+      {
+        "case": "wrong_parent",
+        "status": 422,
+        "response": {
+          "ok": false,
+          "error": "附件与文献归属不匹配"
+        }
+      }
+    ],
+    "no_bad_cards_created": true
+  },
+  "external_protocol": {
+    "card_id": "ev_reader_27653fa724690cab",
+    "launcher_exit": 0,
+    "protocol_handled": true,
+    "reader_verified": true,
+    "logs": [
+      "[11:45:06] Handling card open request for: ev_reader_27653fa724690cab",
+      "[11:45:06] Created temporary evidence highlight annotation: MTBFHBZA",
+      "[11:45:06] Opening file attachment 8TEGCNID (id: 36) at pageIndex 7, annot: MTBFHBZA",
+      "[11:45:06] Reader verified: {\"bridge_version\":\"1.2.2\",\"attachment_key\":\"8TEGCNID\",\"page_index\":7,\"annotation_key\":\"MTBFHBZA\",\"annotation_in_reader\":true,\"page_rendered\":true,\"selected_annotation\":true}"
+    ]
+  },
+  "test_suite": {
+    "python_tests_passed": 49,
+    "reader_bridge_contract": "passed"
+  },
+  "method": "Native Reader state, real PDF characters, rendered native selection popup and button click; no pixel screenshot or physical mouse drag."
+}

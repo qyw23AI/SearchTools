@@ -7,6 +7,7 @@ os.environ.setdefault('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
 from pathlib import Path
 import sys
 import time
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 class FlushStreamHandler(logging.StreamHandler):
@@ -366,6 +367,15 @@ def main():
             import re
             session = asyncio.run(run_resilient_paperqa(job, settings, llm_model, emb_model))
 
+            # Match retrieved documents to the frozen input manifest by content,
+            # never by a model-generated/truncated citation title.
+            import hashlib
+            manifest_by_md5 = {}
+            for paper in job.get('manifest') or []:
+                path = Path(job['papers']) / paper['name']
+                if path.is_file():
+                    digest = hashlib.md5(path.read_bytes()).hexdigest()
+                    manifest_by_md5.setdefault(digest, []).append(paper)
             contexts = []
             cutoff_score = max(5, getattr(getattr(settings, 'answer', None), 'evidence_relevance_score_cutoff', 5) or 5)
             for c in (getattr(session, 'contexts', None) or []):
@@ -392,7 +402,11 @@ def main():
                 if c_score < cutoff_score or is_bib_or_negative or not c_summary:
                     continue
 
+                matches = manifest_by_md5.get(str(getattr(doc, 'content_hash', '') or ''), [])
+                source_paper = matches[0] if len(matches) == 1 else {}
                 contexts.append({
+                    'source_paper_id': source_paper.get('id'),
+                    'source_sha256': source_paper.get('sha'),
                     'id': getattr(c, 'id', ''),
                     'claim': c_claim,
                     'summary': c_summary,
@@ -406,6 +420,9 @@ def main():
                 })
 
             contexts.sort(key=lambda x: x['score'], reverse=True)
+            from searchtools.atomic import atomize_contexts
+            retrieved_contexts = contexts
+            contexts, atomic_diagnostics = asyncio.run(atomize_contexts(contexts, job['prompt'], cfg))
 
             formatted = getattr(session, 'formatted_answer', '') or getattr(session, 'answer', '')
             if job['kind'] == 'evidence':
@@ -421,6 +438,8 @@ def main():
                 'cost': getattr(session, 'cost', 0.0),
                 'token_counts': getattr(session, 'token_counts', {}),
                 'contexts': contexts,
+                'retrieved_contexts': retrieved_contexts,
+                'atomic_diagnostics': atomic_diagnostics,
             }
 
     result['input_manifest'] = job.get('manifest')

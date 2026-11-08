@@ -3,17 +3,11 @@ import re
 import sys
 from pathlib import Path
 
-# Ensure PyMuPDF is importable
+# Never add another Python interpreter's site-packages: native extensions are ABI-specific.
 try:
     import fitz
 except ImportError:
-    for p in ['/home/qyw/DeepTutor/.venv/lib/python3.11/site-packages']:
-        if os.path.exists(p) and p not in sys.path:
-            sys.path.insert(0, p)
-    try:
-        import fitz
-    except ImportError:
-        fitz = None
+    fitz = None
 
 
 def resolve_attachment_pdf(att_key: str, zot_key: str = "") -> Path | None:
@@ -21,13 +15,18 @@ def resolve_attachment_pdf(att_key: str, zot_key: str = "") -> Path | None:
     from .zotero import Library
     lib = Library()
     
-    # 1. Check direct storage folder
+    # Resolve the exact requested attachment through Zotero's configured storage.
     if att_key:
-        att_dir = Path.home() / 'Zotero' / 'storage' / att_key
-        if att_dir.is_dir():
-            pdfs = list(att_dir.glob('*.pdf'))
-            if pdfs:
-                return pdfs[0]
+        try:
+            from urllib.parse import urlparse, unquote
+            u = urlparse(lib.client.file_url(att_key))
+            path = Path(unquote(u.path))
+            if u.scheme == 'file' and path.is_file() and path.suffix.lower() == '.pdf':
+                return path
+        except Exception:
+            pass
+        # Never silently switch to a different attachment of the same paper.
+        return None
 
     # 2. Try library attachment info
     key_to_try = att_key or zot_key
@@ -51,123 +50,120 @@ def resolve_attachment_pdf(att_key: str, zot_key: str = "") -> Path | None:
     return None
 
 
-def locate_quote_in_pdf(pdf_path: str | Path, quote: str, page_hint: str = "") -> dict:
+def normalize_with_map(text):
+    """Normalize typography, spacing and line-break hyphens, retaining source offsets."""
+    import unicodedata
+    chars, offsets = [], []
+    removed = set()
+    for match in re.finditer(r'[-\u00ad]\s*\n\s*(?=\w)', text):
+        removed.update(range(match.start(), match.end()))
+    for i, char in enumerate(text):
+        if i in removed or char == '\u00ad':
+            continue
+        for c in unicodedata.normalize('NFKC', char).casefold():
+            if not c.isspace():
+                chars.append(c)
+                offsets.append(i)
+    return ''.join(chars), offsets
+
+
+def locate_quote_in_pdf(pdf_path: str | Path, quote: str, page_hint: str = '') -> dict:
+    """Verify the complete quote; hints never resolve duplicate-source ambiguity.
+
+    PDF blocks are layout paragraphs, not model-invented semantic paragraphs.
+    Each span carries line rectangles and original block text for inspection.
     """
-    Search for quote in PDF and return exact page_index (0-based) and
-    bounding boxes in Zotero coordinate format (bottom-left origin).
-    """
-    pdf_p = Path(pdf_path)
-    if not pdf_p.exists() or not fitz:
-        return {
-            'status': 'failed',
-            'page_index': 0,
-            'page_label': '1',
-            'rects': [],
-            'error': f'PDF not found or fitz unavailable: {pdf_path}'
-        }
-
-    try:
-        doc = fitz.open(str(pdf_p))
-    except Exception as e:
-        return {
-            'status': 'failed',
-            'page_index': 0,
-            'page_label': '1',
-            'rects': [],
-            'error': str(e)
-        }
-
-    total_pages = len(doc)
-    if total_pages == 0:
-        return {'status': 'failed', 'page_index': 0, 'page_label': '1', 'rects': [], 'error': 'Empty PDF'}
-
-    # Parse page hints (e.g. "5-6" -> [4, 5], "7" -> [6])
-    hint_indices = []
-    if page_hint:
-        for seg in re.split(r'[,-]', str(page_hint).strip()):
+    import hashlib
+    if fitz is None:
+        import subprocess, json
+        python = Path('/home/qyw/DeepTutor/.venv/bin/python')
+        if python.is_file():
             try:
-                val = int(seg.strip()) - 1
-                if 0 <= val < total_pages and val not in hint_indices:
-                    hint_indices.append(val)
-            except Exception:
-                pass
+                result = subprocess.run([str(python), '-m', 'searchtools.locate'],
+                    input=json.dumps({'pdf_path': str(pdf_path), 'quote': quote, 'page_hint': page_hint}),
+                    text=True, capture_output=True, timeout=90, cwd=Path(__file__).resolve().parents[1], check=True)
+                return json.loads(result.stdout)
+            except Exception as exc:
+                return {'version': 3, 'status': 'failed', 'rects': [], 'spans': [], 'error': str(exc)}
+    failure = {'version': 3, 'status': 'unverified', 'page_index': None,
+               'page_label': None, 'rects': [], 'spans': []}
+    target, _ = normalize_with_map(quote or '')
+    if len(target) < 16:
+        return dict(failure, error='Quote too short for reliable attribution')
+    if not fitz or not Path(pdf_path).is_file():
+        return dict(failure, error='PDF missing or PyMuPDF unavailable')
+    try:
+        pdf_hash = hashlib.sha256(Path(pdf_path).read_bytes()).hexdigest()
+        with fitz.open(str(pdf_path)) as doc:
+            text, lines, paragraphs = '', [], {}
+            for pi, page in enumerate(doc):
+                for bi, block in enumerate(page.get_text('rawdict', sort=True)['blocks']):
+                    if block.get('type') != 0:
+                        continue
+                    pid = f'{pdf_hash[:16]}:p{pi}:b{bi}'
+                    start = len(text)
+                    for li, line in enumerate(block.get('lines', [])):
+                        chars = [char for span in line['spans'] for char in span.get('chars', [])]
+                        line_text = ''.join(char['c'] for char in chars)
+                        a = len(text)
+                        text += line_text + '\n'
+                        # Line bounds are intentionally explicit, not character-tight boxes.
+                        x0, y0, x1, y1 = line['bbox']
+                        lines.append({'start': a, 'end': len(text)-1, 'page_index': pi,
+                                      'paragraph_id': pid, 'line_index': li,
+                                      'chars': chars,
+                                      'rect': [x0, page.rect.height-y1, x1, page.rect.height-y0]})
+                    paragraphs[pid] = {'text': text[start:], 'start': start,
+                                       'end': len(text), 'page_index': pi}
+            normalized, mapping = normalize_with_map(text)
+            hits = []
+            cursor = 0
+            while True:
+                pos = normalized.find(target, cursor)
+                if pos < 0:
+                    break
+                hits.append(pos)
+                cursor = pos + 1
+            if len(hits) != 1:
+                return dict(failure, status='ambiguous' if hits else 'unverified',
+                            matches=len(hits), pdf_sha256=pdf_hash,
+                            error='Complete quote is repeated' if hits else 'Complete quote not found')
+            start, end = mapping[hits[0]], mapping[hits[0]+len(target)-1]+1
+            spans = []
+            for pid, para in paragraphs.items():
+                selected = [ln for ln in lines if ln['paragraph_id'] == pid and
+                            ln['start'] < end and ln['end'] > start]
+                if not selected:
+                    continue
+                page = doc[para['page_index']]
+                rects = []
+                for ln in selected:
+                    selected_chars = ln['chars'][max(0, start-ln['start']):max(0, end-ln['start'])]
+                    if not selected_chars:
+                        continue
+                    boxes = [c['bbox'] for c in selected_chars]
+                    rects.append([min(b[0] for b in boxes), page.rect.height-max(b[3] for b in boxes),
+                                  max(b[2] for b in boxes), page.rect.height-min(b[1] for b in boxes)])
+                spans.append({'paragraph_id': pid, 'page_index': para['page_index'],
+                              'page_label': page.get_label() or str(para['page_index']+1),
+                              'paragraph_text': para['text'],
+                              'quote': text[max(start, para['start']):min(end, para['end'])],
+                              'quote_start': max(start, para['start'])-para['start'],
+                              'quote_end': min(end, para['end'])-para['start'],
+                              'rects': rects,
+                              'line_indices': [ln['line_index'] for ln in selected]})
+            if any(doc[span['page_index']].rotation for span in spans):
+                return dict(failure, error='Rotated PDF requires coordinate review', pdf_sha256=pdf_hash)
+            first = spans[0]
+            return {'version': 3, 'status': 'exact', 'pdf_sha256': pdf_hash,
+                    'page_index': first['page_index'], 'page_label': first['page_label'],
+                    'rects': first['rects'], 'spans': spans, 'quote': text[start:end],
+                    'coordinate_system': 'pdf-bottom-left', 'geometry': 'character-range-line-unions'}
+    except Exception as exc:
+        return dict(failure, error=str(exc))
 
-    fallback_page = hint_indices[0] if hint_indices else 0
 
-    # Clean and normalize quote
-    clean_q = re.sub(r'[\r\n\t]+', ' ', quote or '').strip()
-    clean_q = re.sub(r'\s{2,}', ' ', clean_q)
-    if not clean_q:
-        return {
-            'status': 'page_only',
-            'page_index': fallback_page,
-            'page_label': str(fallback_page + 1),
-            'rects': []
-        }
-
-    # Generate multi-level search candidate phrases
-    words = clean_q.split()
-    candidates = []
-    if len(words) >= 6:
-        # Full first sentence or first 12 words
-        first_clause = clean_q.split('.')[0].strip()
-        if len(first_clause.split()) >= 4:
-            candidates.append(first_clause)
-        candidates.append(' '.join(words[:12]))
-        candidates.append(' '.join(words[len(words)//2:len(words)//2 + 10]))
-        candidates.append(' '.join(words[-12:]))
-        candidates.append(' '.join(words[:6]))
-    else:
-        candidates.append(clean_q)
-
-    # Clean punctuation for fallback matching
-    candidates.extend([re.sub(r'[^\w\s]', '', c) for c in candidates[:3]])
-
-    # Search order: hint pages first, then ±2 pages around hints, then remainder
-    priority_pages = []
-    for h in hint_indices:
-        for offset in (0, -1, 1, -2, 2):
-            p = h + offset
-            if 0 <= p < total_pages and p not in priority_pages:
-                priority_pages.append(p)
-    full_order = priority_pages + [p for p in range(total_pages) if p not in priority_pages]
-
-    for p_idx in full_order:
-        page = doc[p_idx]
-        h = page.rect.height
-        
-        for cand in candidates:
-            if not cand or len(cand.strip()) < 4:
-                continue
-            rects = page.search_for(cand.strip())
-            if not rects and len(cand) > 25:
-                # Try prefix
-                rects = page.search_for(cand[:24].strip())
-                
-            if rects:
-                # Convert fitz Rect (top-left origin) to Zotero rect (bottom-left origin)
-                z_rects = [
-                    [
-                        round(float(r.x0), 2),
-                        round(float(h - r.y1), 2),
-                        round(float(r.x1), 2),
-                        round(float(h - r.y0), 2)
-                    ]
-                    for r in rects
-                ]
-                match_status = 'exact' if (p_idx in hint_indices or len(cand) >= 15) else 'fuzzy'
-                return {
-                    'status': match_status,
-                    'page_index': p_idx,
-                    'page_label': str(p_idx + 1),
-                    'rects': z_rects,
-                    'matched_phrase': cand[:40]
-                }
-
-    # If no text search matched, return page_only
-    return {
-        'status': 'page_only',
-        'page_index': fallback_page,
-        'page_label': str(fallback_page + 1),
-        'rects': []
-    }
+if __name__ == '__main__':
+    import json
+    request = json.load(sys.stdin)
+    print(json.dumps(locate_quote_in_pdf(**request), ensure_ascii=False))

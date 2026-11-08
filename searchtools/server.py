@@ -15,6 +15,7 @@ import uuid
 
 from .core import Store, Worker, config, gpu_busy, ROOT, catalog_for, index_files
 from .models import test_payload, sync_deeptutor_live_selection
+from .model_events import ModelEventHub
 from .zotero import Library, ZoteroError, render_markdown, render_freemind
 from .deeptutor_bridge import (
     get_deeptutor_status, register_mcp_server, list_knowledge_bases,
@@ -25,7 +26,8 @@ from .deeptutor_bridge import (
 class App:
     def __init__(self, cfg):
         self.cfg = cfg
-        self.store = Store(cfg['data'])
+        self.store = Store(cfg['data'], cfg=cfg)
+        self.model_events = ModelEventHub(cfg)
         self.worker = Worker(self.store, cfg)
         self.catalog = catalog_for(cfg)
         self.library = Library()
@@ -287,6 +289,39 @@ def handler(app):
                     cards = [app.store._enrich_card_v2(r) for r in app.store.rows('SELECT * FROM evidence_cards WHERE zotero_key=? ORDER BY score DESC', (item_key,))]
                     return self.send(200, {'cards': cards, 'total': len(cards)})
 
+                if path == '/api/deeptutor/model-state':
+                    return self.send(200, app.model_events.current(q.get('client_id', [None])[0]))
+                if path == '/api/deeptutor/model-events':
+                    client_id = q.get('client_id', [None])[0]
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/event-stream')
+                    self.send_header('Cache-Control', 'no-cache')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    try:
+                        generation = -1
+                        while True:
+                            with app.model_events.condition:
+                                if generation == app.model_events.generation:
+                                    app.model_events.condition.wait(timeout=15)
+                                changed = generation != app.model_events.generation
+                                generation = app.model_events.generation
+                                if changed:
+                                    try:
+                                        state = app.model_events.current(client_id)
+                                    except ValueError:
+                                        state = {'status': 'unbound', 'model': {}}
+                                    payload = ('data: ' + json.dumps(state, ensure_ascii=False) + '\n\n').encode()
+                                else:
+                                    payload = b': keepalive\n\n'
+                            self.wfile.write(payload)
+                            self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
+
+                if path == '/api/zotero/action-status':
+                    return self.send(200, app.store.zotero_action_status(q.get('id', [''])[0]))
+
                 if path == '/api/zotero/actions':
                     status_only = q.get('status', ['0'])[0] == '1'
                     if status_only:
@@ -294,7 +329,7 @@ def handler(app):
                         return self.send(200, {
                             'connected': (time.time() - last < 5.0) if last else False,
                             'last_poll': last,
-                            'pending_actions': len(getattr(app.store, '_zotero_actions', []))
+                            'pending_actions': app.store.rows("SELECT COUNT(*) AS n FROM zotero_actions WHERE status IN ('pending','delivered') AND created>?", (time.time()-300,))[0]['n']
                         })
                     actions = app.store.pop_zotero_actions()
                     return self.send(200, {'actions': actions})
@@ -369,6 +404,7 @@ def handler(app):
                     '/workbench.js': 'workbench.js',
                     '/workbench.css': 'workbench.css',
                     '/deeptutor_companion.js': 'deeptutor_companion.js',
+                    '/static/deeptutor_companion.js': 'deeptutor_companion.js',
                     '/api/deeptutor/companion.js': 'deeptutor_companion.js',
                 }
                 if path in static:
@@ -550,12 +586,15 @@ def handler(app):
                             if card:
                                 uri = card.get('zotero_link') or ''
                         # Enqueue for active Zotero Evidence Bridge plugin
-                        app.store.enqueue_zotero_action({
+                        if locate_info.get('status') != 'exact':
+                            return self.send(422, {'ok': False, 'error': '完整引文尚未唯一定位，不能生成高亮', 'locate': locate_info})
+                        action_id = app.store.enqueue_zotero_action({
                             'action': 'open_card',
                             'card_id': cid,
                             'card': app.store.get_evidence_card(cid),
                             'locate': locate_info
                         })
+                        return self.send(202, {'ok': True, 'status': 'queued', 'action_id': action_id, 'locate': locate_info})
                     if uri and uri.startswith('zotero://'):
                         import subprocess
                         try:
@@ -564,6 +603,9 @@ def handler(app):
                         except Exception as ex:
                             return self.send(500, {'ok': False, 'error': str(ex)})
                     return self.send(400, {'ok': False, 'error': '无效或缺失的 Zotero 协议链接'})
+
+                if self.path == '/api/zotero/action-ack':
+                    return self.send(200, app.store.ack_zotero_action(data.get('action_id', ''), data.get('error', ''), data.get('result')))
 
                 if self.path == '/api/zotero/log':
                     msg = str(data.get('msg') or '').strip()
@@ -576,39 +618,11 @@ def handler(app):
                     return self.send(200, {'ok': True})
 
                 if self.path == '/api/evidence-cards/create-from-zotero':
-                    quote = str(data.get('quote') or '').strip()
-                    if not quote:
-                        return self.send(400, {'ok': False, 'error': '划选内容为空'})
-                    zot_key = str(data.get('zotero_key') or '').strip()
-                    att_key = str(data.get('attachment_key') or '').strip()
-                    pid = str(data.get('project') or '').strip()
-                    if not pid:
-                        projs = app.store.rows('SELECT id FROM projects ORDER BY created DESC LIMIT 1')
-                        pid = projs[0]['id'] if projs else app.store.create_project('Zotero实证批注')
-
-                    card_data = {
-                        'job_id': 'zotero_reader_selection',
-                        'zotero_key': zot_key,
-                        'attachment_key': att_key,
-                        'citekey': data.get('citekey') or f"zot_{zot_key.lower()}",
-                        'title': data.get('title') or 'Zotero 阅读器划选批注',
-                        'authors': data.get('authors') or '[]',
-                        'year': str(data.get('year') or ''),
-                        'page': str(data.get('page_label') or (int(data.get('page_index', 0)) + 1)),
-                        'page_index': data.get('page_index', 0),
-                        'page_label': str(data.get('page_label') or ''),
-                        'rects': data.get('rects') or [],
-                        'locate_status': 'exact' if data.get('rects') else 'page_only',
-                        'quote': quote,
-                        'summary': data.get('summary') or quote[:120],
-                        'claim': data.get('claim') or '从 Zotero 阅读器划选创建',
-                        'score': float(data.get('score') or 8.5),
-                        'tags': 'zotero_reader,manual',
-                        'pinned': 1
-                    }
-                    cid = app.store.save_evidence_card(pid, card_data)
-                    enriched = app.store.get_evidence_card(cid)
-                    return self.send(200, {'ok': True, 'card': enriched})
+                    try:
+                        card = app.store.capture_reader_selection(data)
+                    except ValueError as exc:
+                        return self.send(422, {'ok': False, 'error': str(exc)})
+                    return self.send(200, {'ok': True, 'card': card})
 
                 # v3 Scope & Candidate Acquisition endpoints
                 if self.path == '/api/scope/create':
@@ -730,8 +744,8 @@ def handler(app):
                     res = register_mcp_server()
                     return self.send(200, {'ok': True, **res})
                 if self.path == '/api/deeptutor/sync-selection':
-                    dt_data = sync_deeptutor_live_selection(data)
-                    return self.send(200, {'ok': True, 'deeptutor_info': dt_data.get('deeptutor_info', {}), 'catalog': app.catalog.public()})
+                    state = app.model_events.select(data)
+                    return self.send(200, {'ok': True, **state})
 
                 return self.send(404, {'error': '未知操作'})
             except (ValueError, KeyError, ZoteroError) as e:

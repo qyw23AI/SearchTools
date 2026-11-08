@@ -9,6 +9,10 @@
   window.__SEARCHTOOLS_COMPANION_INITIALIZED__ = true;
 
   const WORKBENCH_ORIGIN = 'http://127.0.0.1:8765';
+  const modelClientId = crypto.randomUUID();
+  let modelSequence = 0;
+  let modelState = null;
+  let modelSync = Promise.resolve();
   let isOpen = false;
   let panelWidth = Number(localStorage.getItem('st_wb_width') || 430);
 
@@ -71,12 +75,57 @@
 
   const drawer = document.createElement('aside');
   drawer.id = 'st-wb-drawer';
-  drawer.innerHTML = `<div id="st-wb-resizer" title="拖拽调整宽度"></div><iframe id="st-wb-iframe" src="${WORKBENCH_ORIGIN}/workbench?theme=${currentTheme()}"></iframe>`;
+  drawer.innerHTML = `<div id="st-wb-resizer" title="拖拽调整宽度"></div><iframe id="st-wb-iframe" src="${WORKBENCH_ORIGIN}/workbench?theme=${currentTheme()}&client_id=${encodeURIComponent(modelClientId)}"></iframe>`;
 
   document.body.appendChild(btn);
   document.body.appendChild(drawer);
 
   const iframe = drawer.querySelector('#st-wb-iframe');
+  function publishModel(detail) {
+    if (!detail?.selection?.profile_id || !detail?.selection?.model_id) return;
+    const sequence = ++modelSequence;
+    const startedAt = performance.now();
+    iframe.contentWindow?.postMessage({type: 'st-model-pending'}, WORKBENCH_ORIGIN);
+    modelSync = modelSync.catch(() => {}).then(async () => {
+      const response = await fetch(WORKBENCH_ORIGIN + '/api/deeptutor/sync-selection', {
+        method: 'POST', headers: {'Content-Type':'application/json','X-SearchTools-Token':'local-mcp'},
+        body: JSON.stringify({client_id:modelClientId, sequence, selection:detail.selection,
+          session_id:detail.session_id || location.pathname + location.search})
+      });
+      const state = await response.json();
+      if (!response.ok || !state.ok) throw new Error(state.error || '模型同步失败');
+      if (sequence === modelSequence) {
+        modelState = state;
+        modelState.client_elapsed_ms = performance.now() - startedAt;
+        iframe.contentWindow?.postMessage({type:'st-model-confirmed', state:modelState}, WORKBENCH_ORIGIN);
+        btn.title = '已同步：' + state.model.llm_model;
+        window.dispatchEvent(new CustomEvent('searchtools:model-confirmed', {detail:modelState}));
+      }
+      return state;
+    });
+    modelSync.catch(error => {
+      if (sequence !== modelSequence) return;
+      modelState = null;
+      btn.title = '模型同步失败：' + error.message;
+      iframe.contentWindow?.postMessage({type:'st-model-error', error:error.message}, WORKBENCH_ORIGIN);
+    });
+  }
+  window.addEventListener('deeptutor:llm-selection', event => publishModel(event.detail));
+  if (window.__DEEPTUTOR_LLM_SELECTION__) publishModel(window.__DEEPTUTOR_LLM_SELECTION__);
+  iframe.addEventListener('load', () => {
+    if (modelState) iframe.contentWindow?.postMessage({type:'st-model-confirmed',state:modelState}, WORKBENCH_ORIGIN);
+  });
+  window.addEventListener('message', async event => {
+    if (event.origin !== WORKBENCH_ORIGIN || event.source !== iframe.contentWindow || event.data?.type !== 'st-model-context-request') return;
+    try {
+      await modelSync;
+      if (!modelState) throw new Error('DeepTutor 当前会话尚未确认模型');
+      iframe.contentWindow.postMessage({type:'st-model-context-response', request_id:event.data.request_id, state:modelState}, WORKBENCH_ORIGIN);
+    } catch (error) {
+      iframe.contentWindow.postMessage({type:'st-model-context-response', request_id:event.data.request_id, error:error.message}, WORKBENCH_ORIGIN);
+    }
+  });
+
   function toggleDrawer(force) {
     isOpen = typeof force === 'boolean' ? force : !isOpen;
     drawer.classList.toggle('open', isOpen);
@@ -117,7 +166,7 @@
 
   // Listen to messages from Workbench iframe
   window.addEventListener('message', (ev) => {
-    if (!ev.data || typeof ev.data !== 'object') return;
+    if (ev.source !== iframe.contentWindow || ev.origin !== WORKBENCH_ORIGIN || !ev.data || typeof ev.data !== 'object') return;
     if (ev.data.type === 'st-insert-text' && ev.data.text) {
       insertIntoDeepTutor(ev.data.text);
     }

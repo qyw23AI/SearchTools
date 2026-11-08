@@ -1,0 +1,108 @@
+{
+  "date": "2026-11-08",
+  "mechanism": "session selection event + acknowledgment + SSE; no model polling",
+  "switch_to_deepseek": {
+    "state": {
+      "status": "ready",
+      "client_id": "9821081a-dbf2-42f0-ace5-67fd344acb49",
+      "session_id": "/chat",
+      "sequence": 5,
+      "selection": {
+        "profile_id": "llm-profile-d35f069a-f74a-4def-a691-2269a056ad6f",
+        "model_id": "llm-model-6710e923-bcca-404f-b52c-57335cb467a4"
+      },
+      "revision": "72089c30f423472280c5347a32c64ecf",
+      "received_at": 1794111490.5312552,
+      "model": {
+        "llm_binding": "deepseek",
+        "selection_source": "session_event",
+        "profile_id": "llm-profile-d35f069a-f74a-4def-a691-2269a056ad6f",
+        "model_id": "llm-model-6710e923-bcca-404f-b52c-57335cb467a4",
+        "llm_model": "deepseek-flash",
+        "llm_provider": "deepseek",
+        "llm_base_url": "",
+        "emb_binding": "ollama",
+        "emb_model": "qwen3-embedding:4b",
+        "emb_provider": "ollama",
+        "emb_base_url": "http://127.0.0.1:11434"
+      }
+    },
+    "persisted_llm": "deepseek/deepseek-flash",
+    "persisted_summary_llm": "deepseek/deepseek-flash",
+    "elapsed_ms_observed": 6.2
+  },
+  "switch_back_to_gpt56": {
+    "state": {
+      "status": "ready",
+      "client_id": "9821081a-dbf2-42f0-ace5-67fd344acb49",
+      "session_id": "/chat",
+      "sequence": 6,
+      "selection": {
+        "profile_id": "llm-profile-openai-codex-managed",
+        "model_id": "llm-model-openai-codex-419255f2bb4c6801"
+      },
+      "revision": "096b5aade5b645528a0444b7d0286e06",
+      "received_at": 1794111503.8481317,
+      "model": {
+        "llm_binding": "openai_codex",
+        "selection_source": "session_event",
+        "profile_id": "llm-profile-openai-codex-managed",
+        "model_id": "llm-model-openai-codex-419255f2bb4c6801",
+        "llm_model": "gpt-5.6-sol",
+        "llm_provider": "openai",
+        "llm_base_url": "http://127.0.0.1:8001/api/evidence-llm/v1",
+        "emb_binding": "ollama",
+        "emb_model": "qwen3-embedding:4b",
+        "emb_provider": "ollama",
+        "emb_base_url": "http://127.0.0.1:11434"
+      }
+    },
+    "persisted_llm": "openai/gpt-5.6-sol",
+    "persisted_summary_llm": "openai/gpt-5.6-sol",
+    "elapsed_ms_observed": 8.6
+  },
+  "gateway_result": {
+    "id": "dt-e8b0936941624f77b0d7ac98353c581d",
+    "object": "chat.completion",
+    "created": 1794111212,
+    "model": "gpt-5.6-sol",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "MODEL_SYNC_OK"
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  },
+  "paperqa_settings_smoke": {
+    "event_model": "gpt-5.6-sol",
+    "llm": "openai/gpt-5.6-sol",
+    "summary_llm": "openai/gpt-5.6-sol",
+    "revision": "85cd9e9dad4445d5abb0f23ec571c024",
+    "elapsed_s": 2.15,
+    "answer": "PAPERQA_GPT56_OK"
+  },
+  "full_evidence_job": {
+    "project_id": "608e5d3239af438cad9df2fed8515345",
+    "job_id": "cb79d134e7bd4562b222502ce9eca0f5",
+    "model": "gpt-5.6-sol",
+    "revision": "096b5aade5b645528a0444b7d0286e06",
+    "status": "done",
+    "message": "已完成",
+    "cards": [
+      {
+        "id": "ev_cfc53f9cd4",
+        "claim": "In a controlled walking experiment using the same robot and speed, controller A consumed 20% less electrical energy than controller B.",
+        "quote": "controller A consumed\n20 percent less electrical energy than controller B.",
+        "location": "exact"
+      }
+    ]
+  },
+  "python_tests_passed": 57,
+  "frontend_production_build": "passed",
+  "screenshot": "model-sync-proof.png",
+  "data_scope": "fixed prompts and fictional verification PDF only"
+}

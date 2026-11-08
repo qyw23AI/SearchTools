@@ -476,7 +476,7 @@ let detailStatus = null;
 
 load().catch(e => toast(e.message));
 
-// Fast 1.5s real-time polling for active jobs and model synchronization
+// Job progress polling only. Model selection uses the dedicated event stream.
 setInterval(async () => {
   try {
     if (detail) {
@@ -529,7 +529,7 @@ setInterval(async () => {
   } catch {}
 }, 1500);
 
-// Periodic & visibility-driven model sync check (every 2.5s)
+// Model changes arrive via events; focus refresh is a recovery path.
 async function syncModelsOnForeground() {
   try {
     if (page === 'models' && window.ModelsPage?.refreshIfChanged) {
@@ -540,7 +540,8 @@ async function syncModelsOnForeground() {
   } catch {}
 }
 
-setInterval(syncModelsOnForeground, 2500);
+const modelEvents = new EventSource('/api/deeptutor/model-events');
+modelEvents.onmessage = () => syncModelsOnForeground();
 window.searchtoolsOnTabVisible = () => {
   syncModelsOnForeground();
   if (page === 'ask' && window.AskPage?.pollRunningJob) {
