@@ -60,10 +60,20 @@ class ServerExtensionTests(unittest.TestCase):
         self.assertNotEqual(before, removed['cards_revision'])
         self.assertEqual(self._req('/api/evidence-cards?project=' + self.project_id)['cards'], [])
         self.assertEqual(self._req('/api/evidence-cards/by-item?item=ABCDEFGH')['cards'], [])
+        self.assertIn('api-delete', self._req('/api/zotero/actions')['deleted_card_ids'])
         self.assertTrue(self._req('/api/evidence-cards/remove', {'id':'api-delete'})['already_deleted'])
         with self.assertRaises(HTTPError) as error:
             self._req('/api/evidence-cards/remove', {'id':'absent'})
         self.assertEqual(error.exception.code, 404)
+
+    def test_scope_management_api_roundtrip(self):
+        self._req('/api/scope/manage', {'action':'rename','scope_id':self.project_id,'name':'重命名范围'})
+        self.assertEqual(self.app.store.project(self.project_id)['name'],'重命名范围')
+        self._req('/api/scope/manage', {'action':'delete','scope_id':self.project_id})
+        trash=self._req('/api/scope/manage', {'action':'trash'})
+        self.assertEqual(trash[0]['id'],self.project_id)
+        self._req('/api/scope/manage', {'action':'restore','scope_id':self.project_id})
+        self.assertEqual(self.app.store.project(self.project_id)['name'],'重命名范围')
 
     def test_models_api_get_and_update(self):
         # 1. GET /api/models

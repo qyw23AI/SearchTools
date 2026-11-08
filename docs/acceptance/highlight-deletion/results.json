@@ -1,0 +1,79 @@
+{
+  "scope": "1117f37f9ba04d3596551d41226a1275",
+  "cards": [
+    "ev_highlight_delete_0fe697",
+    "ev_highlight_retain_f89bd2"
+  ],
+  "opened": [
+    {
+      "id": "df9d390d0e0e4fd6aa68519547dd7f5d",
+      "status": "failed",
+      "error": "Error: 阅读器未确认目标页渲染或批注加载 · {\"bridge_version\":\"1.2.9\",\"attachment_key\":\"QF757IAF\",\"page_index\":6,\"annotation_key\":\"IPLJL9MW\",\"annotation_in_reader\":true,\"page_rendered\":false,\"selected_annotation\":true}",
+      "result": {
+        "bridge_version": "1.2.9"
+      }
+    },
+    {
+      "id": "dbc00c3df4194ac1b3f58122a6eafcda",
+      "status": "done",
+      "error": "",
+      "result": {
+        "bridge_version": "1.2.9",
+        "attachment_key": "QF757IAF",
+        "page_index": 6,
+        "annotation_key": "S3FCWX7P",
+        "annotation_in_reader": true,
+        "page_rendered": true,
+        "selected_annotation": true
+      }
+    }
+  ],
+  "before": {
+    "id": "3734522b60254dac9916badf301f7165",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.9",
+      "annotation_keys": [
+        "IPLJL9MW",
+        "S3FCWX7P"
+      ]
+    }
+  },
+  "deleted": {
+    "ok": true,
+    "id": "ev_highlight_delete_0fe697",
+    "project": "1117f37f9ba04d3596551d41226a1275",
+    "already_deleted": false,
+    "cards_revision": "23"
+  },
+  "after": {
+    "id": "64ee0a4a2e9e4a9686c5e2e357c10638",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.9",
+      "annotation_keys": []
+    }
+  },
+  "other_card_retained": {
+    "id": "b269e4fb96754319ad59c8481dda8325",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.9",
+      "annotation_keys": [
+        "S3FCWX7P"
+      ]
+    }
+  },
+  "final_cleanup": {
+    "id": "fc510a3d205a4bfaa6eba3ce1d05b636",
+    "status": "done",
+    "error": "",
+    "result": {
+      "bridge_version": "1.2.9",
+      "annotation_keys": []
+    }
+  }
+}

@@ -337,7 +337,7 @@ def handler(app):
                             'pending_actions': app.store.rows("SELECT COUNT(*) AS n FROM zotero_actions WHERE status IN ('pending','delivered') AND created>?", (time.time()-300,))[0]['n']
                         })
                     actions = app.store.pop_zotero_actions()
-                    return self.send(200, {'actions': actions, 'cards_revision': app.store.cards_revision()})
+                    return self.send(200, {'actions': actions, 'cards_revision': app.store.cards_revision(), 'deleted_card_ids': [r['card_id'] for r in app.store.rows('SELECT card_id FROM evidence_card_deletions')], 'retained_card_ids': [r['id'] for r in app.store.rows('SELECT id FROM evidence_cards')] + [c['id'] for row in app.store.rows('SELECT snapshot FROM scope_trash') for c in json.loads(row['snapshot']).get('evidence_cards',[])]})
 
                 if path == '/api/zotero/logs':
                     return self.send(200, {'logs': getattr(app.store, '_zotero_logs', [])})
@@ -627,6 +627,8 @@ def handler(app):
                     return self.send(200, {'ok': True, 'card': card})
 
                 # v3 Scope & Candidate Acquisition endpoints
+                if self.path == '/api/scope/manage':
+                    return self.send(200, app.store.manage_scope(data['action'], data.get('scope_id',''), data.get('name','')))
                 if self.path == '/api/scope/create':
                     res = app.store.create_or_update_scope(
                         name=data.get('name', ''),

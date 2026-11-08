@@ -82,6 +82,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS candidate_batches(id TEXT PRIMARY KEY,scope_id TEXT,topic TEXT,query TEXT,candidates_json TEXT,status TEXT DEFAULT 'pending_confirmation',created REAL);
             CREATE TABLE IF NOT EXISTS trace_events(id TEXT PRIMARY KEY,scope_id TEXT,tool TEXT,status TEXT,summary TEXT,detail_json TEXT,created REAL);
             CREATE TABLE IF NOT EXISTS zotero_actions(id TEXT PRIMARY KEY,payload TEXT,status TEXT,lease_until REAL,created REAL,error TEXT);
+            CREATE TABLE IF NOT EXISTS scope_trash(id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, deleted REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS kv_meta(key TEXT PRIMARY KEY, value TEXT);
             CREATE TABLE IF NOT EXISTS evidence_card_deletions(card_id TEXT PRIMARY KEY, project TEXT NOT NULL, snapshot_json TEXT NOT NULL, deleted REAL NOT NULL);
             INSERT OR IGNORE INTO kv_meta(key,value) VALUES('cards_revision','0');
@@ -113,6 +114,57 @@ class Store:
         if not rows:
             raise ValueError('项目不存在')
         return rows[0]
+
+    def manage_scope(self, action, pid='', name=''):
+        if action == 'trash':
+            return [{'id':r['id'], 'name':json.loads(r['snapshot'])['projects'][0]['name'], 'deleted':r['deleted']}
+                    for r in self.rows('SELECT * FROM scope_trash ORDER BY deleted DESC')]
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if action == 'restore':
+                row = db.execute('SELECT snapshot FROM scope_trash WHERE id=?', (pid,)).fetchone()
+                if not row:
+                    raise ValueError('回收站中没有此研究范围')
+                snapshot = json.loads(row['snapshot'])
+                for table, records in snapshot.items():
+                    for record in records:
+                        columns = list(record)
+                        db.execute('INSERT INTO ' + table + '(' + ','.join(columns) + ') VALUES(' + ','.join('?' for _ in columns) + ')', list(record.values()))
+                db.execute('DELETE FROM scope_trash WHERE id=?', (pid,))
+            else:
+                row = db.execute('SELECT * FROM projects WHERE id=?', (pid,)).fetchone()
+                if not row:
+                    raise ValueError('研究范围不存在')
+                if action == 'rename':
+                    name = str(name).strip()
+                    if not name or len(name)>100:
+                        raise ValueError('名称需要1至100个字符')
+                    db.execute('UPDATE projects SET name=? WHERE id=?', (name,pid))
+                elif action == 'delete':
+                    if db.execute("SELECT 1 FROM jobs WHERE project=? AND status IN ('queued','waiting','running')", (pid,)).fetchone():
+                        raise ValueError('此范围有未结束任务，请先取消或等待完成')
+                    tables = {'projects':'id', 'papers':'project', 'notes':'project', 'jobs':'project',
+                              'evidence_cards':'project', 'candidate_batches':'scope_id', 'trace_events':'scope_id'}
+                    snapshot = {table:[dict(r) for r in db.execute('SELECT * FROM '+table+' WHERE '+column+'=?', (pid,))] for table,column in tables.items()}
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_records'").fetchone():
+                        runs = [r['id'] for r in db.execute("SELECT id,payload FROM research_records WHERE kind='run'") if json.loads(r['payload']).get('scope_id')==pid]
+                        records=[]
+                        for run in runs:
+                            records.extend(dict(r) for r in db.execute('SELECT * FROM research_records WHERE id=? OR run_id=?', (run,run)))
+                        snapshot['research_records']=records
+                    db.execute('INSERT INTO scope_trash VALUES(?,?,?)', (pid,json.dumps(snapshot,ensure_ascii=False),time.time()))
+                    for table, column in tables.items():
+                        db.execute('DELETE FROM '+table+' WHERE '+column+'=?',(pid,))
+                    for record in snapshot.get('research_records',[]):
+                        db.execute('DELETE FROM research_records WHERE id=?',(record['id'],))
+                    for record in db.execute("SELECT id,payload FROM zotero_actions WHERE status IN ('pending','delivered')").fetchall():
+                        if json.loads(record['payload']).get('card_id') in {c['id'] for c in snapshot['evidence_cards']}:
+                            db.execute("UPDATE zotero_actions SET status='failed',error='研究范围已移至回收站' WHERE id=?",(record['id'],))
+                    db.execute("DELETE FROM kv_meta WHERE key='active_project' AND value=?",(pid,))
+                else:
+                    raise ValueError('未知管理操作')
+            db.execute("UPDATE kv_meta SET value=CAST(value AS INTEGER)+1 WHERE key='cards_revision'")
+        return {'ok':True, 'scope_id':pid, 'active_project':self.get_active_project()}
 
     def set_active_project(self, pid: str):
         if pid:
@@ -456,6 +508,8 @@ class Store:
         authors_str = json.dumps(authors, ensure_ascii=False) if isinstance(authors, list) else (str(authors or ''))
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            if not db.execute('SELECT 1 FROM projects WHERE id=?', (pid,)).fetchone():
+                raise ValueError('研究范围不存在或已删除')
             if db.execute('SELECT 1 FROM evidence_card_deletions WHERE card_id=?', (cid,)).fetchone():
                 raise DeletedEvidenceCardError('此证据卡已删除，旧任务不能重新生成同一张卡')
             if card.get('job_id') and card.get('paper_id'):

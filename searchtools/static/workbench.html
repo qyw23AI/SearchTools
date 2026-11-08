@@ -122,6 +122,13 @@
 
       <!-- Tab 3: Research Scope & Manual PaperQA2 Trigger -->
       <section id="wb-panel-scope" class="wb-panel">
+        <div class="wb-btn-group" style="margin-bottom:12px;flex-wrap:wrap">
+          <button id="wb-scope-rename" class="wb-btn wb-btn-secondary">重命名当前范围</button>
+          <button id="wb-scope-delete" class="wb-btn wb-btn-secondary">删除当前范围</button>
+          <button id="wb-scope-trash" class="wb-btn wb-btn-secondary">回收站</button>
+          <button id="wb-scope-export" class="wb-btn wb-btn-secondary">导出文献清单</button>
+        </div>
+        <dialog id="wb-trash-dialog"><h3>研究范围回收站</h3><div id="wb-trash-list"></div><form method="dialog"><button>关闭</button></form></dialog>
         <div class="wb-scope-summary" id="wb-scope-metrics"></div>
 
         <div class="wb-card-box">

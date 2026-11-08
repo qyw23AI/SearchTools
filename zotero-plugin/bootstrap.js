@@ -20,7 +20,7 @@ var lastSelectionPopup = null;
 var lastCapture = null;
 
 const SEARCHTOOLS_HOST = 'http://127.0.0.1:8765';
-const BRIDGE_VERSION = '1.2.8';
+const BRIDGE_VERSION = '1.3.1';
 const ADDON_ID = 'evidence-bridge@searchtools.org';
 const PANE_ID = 'evidence-bridge-itempane-section';
 
@@ -991,9 +991,100 @@ async function acceptanceCapture(action) {
     selection_quote: text, original_card_id: action.card_id};
 }
 
+function annotationBelongsToDeletedCard(annotation, deletedIds) {
+  if (annotation.annotationType !== 'highlight') return false;
+  let comment = annotation.annotationComment || '';
+  let match = comment.match(/【论证支撑证据卡 ([^】]+)】|\[card:([^\]]+)\]/);
+  let identity = match && (match[1] || match[2]);
+  if (identity && (deletedIds.has(identity) || deletedIds.has(identity.replace(/-span-\d+$/, '')))) return true;
+  return (annotation.getTags?.() || []).some(({tag}) =>
+    (tag.startsWith('#card-') && deletedIds.has(tag.slice(6))) ||
+    (tag.startsWith('card-') && deletedIds.has(tag.slice(5))));
+}
+
+async function removeDeletedCardHighlights(cardIds) {
+  let deletedIds = new Set(cardIds);
+  if (!deletedIds.size) return {removed:0};
+  let removed = [];
+  let ids = await Zotero.DB.columnQueryAsync('SELECT itemID FROM itemAnnotations');
+  for (let id of ids) {
+    let annotation = await Zotero.Items.getAsync(Number(id));
+    if (annotation && annotationBelongsToDeletedCard(annotation, deletedIds)) {
+      let key = annotation.key;
+      await annotation.eraseTx();
+      removed.push(key);
+    }
+  }
+  if (removed.length) {
+    await waitForValue(() => Zotero.Reader._readers.every(reader =>
+      !(reader._internalReader?._state?.annotations || []).some(a => removed.includes(a.id))),
+      '批注已删除，但阅读器尚未确认移除');
+  }
+  return {removed:removed.length, annotation_keys:removed};
+}
+
+async function reconcileEvidenceNotes(retainedIds) {
+  const retained = new Set(retainedIds);
+  const ids = await Zotero.DB.columnQueryAsync('SELECT itemID FROM itemNotes');
+  let trashed = [], updated = [];
+  const Parser = Zotero.getMainWindow().DOMParser;
+  for (let id of ids) {
+    let note = await Zotero.Items.getAsync(Number(id));
+    if (!note || note.deleted || !note.isNote()) continue;
+    let html = note.getNote() || '';
+    let single = html.match(/searchtools-card-id:\s*([^\s<]+)|【学术实证卡 ([^】]+)】/);
+    if (single) {
+      if (!retained.has(single[1] || single[2])) {note.deleted=true; await note.saveTx();trashed.push(note.key);}
+      continue;
+    }
+    const doc = new Parser().parseFromString(html, 'text/html');
+    const body = doc.body;
+    if (!body.textContent.includes('PaperQA2 实证卡片与引用溯源') ||
+        !body.textContent.includes('由 DeepTutor & PaperQA2 自动核验写回')) continue;
+    let changed = false;
+    for (let strong of [...body.querySelectorAll('strong')]) {
+      const match = strong.textContent.match(/^\[([^\]]+)\]\s*核验问题/);
+      if (!match || retained.has(match[1])) continue;
+      const block = strong.closest('p')?.parentElement;
+      if (!block) continue;
+      if (block === body || block.querySelector('h2')) {
+        // Zotero can flatten historical card DIVs into sibling paragraphs.
+        const header = strong.closest('p');
+        let next = header.nextElementSibling;
+        header.remove();
+        if (next?.tagName === 'P' && next.textContent.trim().startsWith('核心结论：')) {
+          const old = next; next = next.nextElementSibling; old.remove();
+        }
+        if (next?.tagName === 'BLOCKQUOTE') {
+          const old = next; next = next.nextElementSibling; old.remove();
+        }
+        if (next?.tagName === 'HR') next.remove();
+      } else {
+        if (block.nextElementSibling?.tagName === 'HR') block.nextElementSibling.remove();
+        block.remove();
+      }
+      changed=true;
+    }
+    if (!changed) continue;
+    // Ignore only the generated header/date when deciding whether user content remains.
+    const check = body.cloneNode(true);
+    for (let node of [...check.querySelectorAll('h2, hr')]) node.remove();
+    for (let em of [...check.querySelectorAll('em')]) {
+      if (em.textContent.includes('自动核验写回')) em.closest('p')?.remove();
+    }
+    if (!check.textContent.trim() && !check.querySelector('img, table, audio, video')) {
+      note.deleted=true; trashed.push(note.key);
+    } else {note.setNote(body.innerHTML); updated.push(note.key);}
+    await note.saveTx();
+  }
+  log('Evidence note reconciliation: ' + JSON.stringify({trashed,updated}));
+  return {trashed, updated};
+}
+
 async function deleteEvidenceCard(card) {
   let result = await httpPost(`${SEARCHTOOLS_HOST}/api/evidence-cards/remove`, {id: card.id, project: card.project});
   if (!result?.ok) throw new Error(result?.error || '后端未确认删除');
+  result.highlight_cleanup = await removeDeletedCardHighlights([card.id]);
   if (sectionRefreshCallback) sectionRefreshCallback();
   return result;
 }
@@ -1006,6 +1097,8 @@ function startActionPoller() {
     try {
       let data = await httpGet(`${SEARCHTOOLS_HOST}/api/zotero/actions`);
       if (data.cards_revision != null && data.cards_revision !== observedCardsRevision) {
+        await removeDeletedCardHighlights(data.deleted_card_ids || []);
+        if (Array.isArray(data.retained_card_ids)) await reconcileEvidenceNotes(data.retained_card_ids);
         await refreshEvidencePanels();
         observedCardsRevision = data.cards_revision;
       }
@@ -1014,6 +1107,11 @@ function startActionPoller() {
           let result;
           if (action.action === 'open_card' && action.card_id) {
             result = action.locate ? await highlightAndOpenCard(action.locate) : await handleCardOpen(action.card_id);
+          } else if (action.action === 'inspect_annotations') {
+            let ids = await Zotero.DB.columnQueryAsync('SELECT itemID FROM itemAnnotations');
+            let annotations = [];
+            for (let id of ids) {let a=await Zotero.Items.getAsync(Number(id)); if(a && annotationBelongsToDeletedCard(a,new Set(action.card_ids || []))) annotations.push(a.key);}
+            result={bridge_version:BRIDGE_VERSION, annotation_keys:annotations};
           } else if (action.action === 'inspect_panels') {
             result = {bridge_version:BRIDGE_VERSION, panels:[...evidencePanels].filter(([body])=>body.isConnected).map(([body,context])=>({item_key:context.item?.key, title:body.querySelector('#evidence-bridge-title-badge')?.textContent, cards:[...body.querySelectorAll('.evidence-card-box')].map(el=>el.querySelector('span')?.textContent)}))};
           } else if (action.action === 'acceptance_capture') {

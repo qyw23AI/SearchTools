@@ -157,6 +157,53 @@
     });
   });
 
+  async function manageScope(action, scopeId, name) {
+    return api('/api/scope/manage', {method:'POST',body:JSON.stringify({action,scope_id:scopeId,name})});
+  }
+  document.getElementById('wb-scope-rename').onclick = async () => {
+    if (!currentScopeId) return showToast('请先创建研究范围');
+    const name = prompt('研究范围新名称', scopesList.find(s=>s.id===currentScopeId)?.name || '');
+    if (!name?.trim()) return;
+    try {await manageScope('rename',currentScopeId,name.trim()); await refreshAll(); showToast('名称已更新');}
+    catch(error){showToast(error.message);}
+  };
+  document.getElementById('wb-scope-delete').onclick = async () => {
+    if (!currentScopeId) return showToast('当前没有可删除的范围');
+    if (!confirm('将当前研究范围及其文献关联、证据卡和任务记录移至回收站？可从回收站恢复。Zotero 原始文献保留。')) return;
+    try {
+      const result = await manageScope('delete',currentScopeId);
+      currentScopeId = result.active_project || '';
+      selectedCardIds.clear();
+      localStorage.setItem('searchtools-project',currentScopeId);
+      await refreshAll();
+      if (currentScopeId) await setCurrentScope(currentScopeId);
+      else {cachedCards=[];renderCardsList(); document.getElementById('wb-scope-papers').textContent='暂无研究范围，请创建或从回收站恢复'; document.getElementById('wb-scope-metrics').replaceChildren();}
+      showToast('研究范围已移至回收站');
+    } catch(error){showToast(error.message);}
+  };
+  document.getElementById('wb-scope-trash').onclick = async () => {
+    try {
+      const scopes = await manageScope('trash');
+      const list=document.getElementById('wb-trash-list');list.replaceChildren();
+      if(!scopes.length) list.textContent='回收站为空';
+      for(const scope of scopes){
+        const row=document.createElement('p');const label=document.createElement('span');label.textContent=scope.name+' ';
+        const restore=document.createElement('button');restore.textContent='恢复';
+        restore.onclick=async()=>{try{await manageScope('restore',scope.id);document.getElementById('wb-trash-dialog').close();await refreshAll();await setCurrentScope(scope.id);showToast('研究范围已恢复');}catch(error){showToast(error.message);}};
+        row.append(label,restore);list.append(row);
+      }
+      document.getElementById('wb-trash-dialog').showModal();
+    }catch(error){showToast(error.message);}
+  };
+  document.getElementById('wb-scope-export').onclick = async()=>{
+    if(!currentScopeId)return showToast('请先选择研究范围');
+    try{
+      const scope=await api('/api/scope/status?scope_id='+encodeURIComponent(currentScopeId));
+      const url=URL.createObjectURL(new Blob([JSON.stringify(scope,null,2)],{type:'application/json'}));
+      const a=document.createElement('a');a.href=url;a.download='research-scope-'+currentScopeId+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(error){showToast(error.message);}
+  };
+
   // Scope selection & Creation
   const scopeSelect = document.getElementById('wb-scope-select');
 
@@ -230,6 +277,7 @@
       ]);
 
       scopesList = stState.projects || [];
+      if (currentScopeId && !scopesList.some(p=>p.id===currentScopeId)) currentScopeId='';
       if (!currentScopeId) {
         const storedPid = localStorage.getItem('searchtools-project');
         if (storedPid && scopesList.some((p) => p.id === storedPid)) {
@@ -497,6 +545,7 @@
   let observedCardsRevision = null;
   async function loadCards() {
     const requestSequence = ++cardsRequestSequence;
+    if (!currentScopeId) {cachedCards=[]; selectedCardIds.clear();document.getElementById('wb-badge-cards').textContent='0';renderCardsList();updateBatchBar();return;}
     const q = document.getElementById('wb-card-search').value.trim();
     const minScore = document.getElementById('wb-card-score').value;
     const pinnedOnly = document.getElementById('wb-card-pinned').checked ? '1' : '0';
@@ -707,10 +756,19 @@
     } catch (_) {}
   }
 
+  let scopeDetailSequence=0;
   async function loadScopeDetail() {
-    if (!currentScopeId) return;
+    const sequence=++scopeDetailSequence;
+    const scopeId=currentScopeId;
+    if (!scopeId) {
+      document.getElementById('wb-badge-scope').textContent='0';
+      document.getElementById('wb-scope-metrics').replaceChildren();
+      document.getElementById('wb-scope-papers').textContent='暂无研究范围，请创建或从回收站恢复';
+      return;
+    }
     try {
-      const st = await api(`/api/scope/status?scope_id=${encodeURIComponent(currentScopeId)}`);
+      const st = await api(`/api/scope/status?scope_id=${encodeURIComponent(scopeId)}`);
+      if(sequence!==scopeDetailSequence || currentScopeId!==scopeId)return;
       document.getElementById('wb-badge-scope').textContent = String(st.total_papers || 0);
       document.getElementById('wb-scope-metrics').innerHTML = `
         <div class="wb-metric"><div class="wb-metric-val">${st.total_papers || 0}</div><div class="wb-metric-lbl">有 PDF 文献</div></div>
@@ -738,11 +796,16 @@
               <div class="wb-card-meta">
                 citekey: <code>${esc(p.citekey || '-')}</code> · Zotero: <code>${esc(p.zotero_item || '-')}</code>
                 ${p.year ? ` · ${esc(p.year)}` : ''}
+                <button class="wb-btn wb-btn-secondary wb-btn-xs" data-remove-paper="${esc(p.id)}">移出研究范围</button>
               </div>
             </div>
           `;
         })
         .join('');
+      papersEl.querySelectorAll('[data-remove-paper]').forEach(btn=>{btn.onclick=async()=>{
+        if(!confirm('将此文献移出当前范围？Zotero 原文保留。'))return;
+        try{await api('/api/paper/remove',{method:'POST',body:JSON.stringify({project:currentScopeId,id:btn.dataset.removePaper})});await loadScopeDetail();}catch(error){showToast(error.message);}
+      };});
     } catch (e) {
       console.warn('loadScopeDetail error:', e);
     }
